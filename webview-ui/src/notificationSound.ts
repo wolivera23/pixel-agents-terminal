@@ -20,9 +20,12 @@ import {
   TOOL_START_NOTE_DURATION_SEC,
   TOOL_START_NOTE_HZ,
   TOOL_START_VOLUME,
-  TYPING_CLICK_DURATION_SEC,
+  TYPING_CLICK_BODY_DUR_SEC,
+  TYPING_CLICK_BODY_HZ,
+  TYPING_CLICK_BODY_VOLUME,
   TYPING_CLICK_INTERVAL_MS,
-  TYPING_CLICK_VOLUME,
+  TYPING_CLICK_NOISE_DUR_SEC,
+  TYPING_CLICK_NOISE_VOLUME,
 } from './constants.js';
 
 let soundEnabled = true;
@@ -162,24 +165,43 @@ let typingInterval: ReturnType<typeof setInterval> | null = null;
 function playTypingClick(): void {
   if (!audioCtx || !soundEnabled) return;
   const t = audioCtx.currentTime;
-  // White-noise burst: fill a short buffer with random samples
-  const bufLen = Math.ceil(audioCtx.sampleRate * TYPING_CLICK_DURATION_SEC);
-  const buffer = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufLen; i++) {
-    data[i] = (Math.random() * 2 - 1) * TYPING_CLICK_VOLUME;
-  }
-  // Quick exponential fade-out
-  const gain = audioCtx.createGain();
-  gain.gain.setValueAtTime(1, t);
-  gain.gain.exponentialRampToValueAtTime(0.001, t + TYPING_CLICK_DURATION_SEC);
 
-  const src = audioCtx.createBufferSource();
-  src.buffer = buffer;
-  src.connect(gain);
-  gain.connect(audioCtx.destination);
-  src.start(t);
-  src.stop(t + TYPING_CLICK_DURATION_SEC);
+  // ── Layer 1: high-frequency noise transient (the "tick") ──
+  const noiseBufLen = Math.ceil(audioCtx.sampleRate * TYPING_CLICK_NOISE_DUR_SEC);
+  const noiseBuffer = audioCtx.createBuffer(1, noiseBufLen, audioCtx.sampleRate);
+  const noiseData = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < noiseBufLen; i++) {
+    noiseData[i] = Math.random() * 2 - 1;
+  }
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = 'highpass';
+  noiseFilter.frequency.value = 2000;
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.setValueAtTime(TYPING_CLICK_NOISE_VOLUME, t);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, t + TYPING_CLICK_NOISE_DUR_SEC);
+  const noiseSrc = audioCtx.createBufferSource();
+  noiseSrc.buffer = noiseBuffer;
+  noiseSrc.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(audioCtx.destination);
+  noiseSrc.start(t);
+  noiseSrc.stop(t + TYPING_CLICK_NOISE_DUR_SEC);
+
+  // ── Layer 2: low-frequency sine resonance (the "thock") ───
+  const bodyOsc = audioCtx.createOscillator();
+  bodyOsc.type = 'sine';
+  bodyOsc.frequency.setValueAtTime(TYPING_CLICK_BODY_HZ, t);
+  bodyOsc.frequency.exponentialRampToValueAtTime(
+    TYPING_CLICK_BODY_HZ * 0.6,
+    t + TYPING_CLICK_BODY_DUR_SEC,
+  );
+  const bodyGain = audioCtx.createGain();
+  bodyGain.gain.setValueAtTime(TYPING_CLICK_BODY_VOLUME, t);
+  bodyGain.gain.exponentialRampToValueAtTime(0.001, t + TYPING_CLICK_BODY_DUR_SEC);
+  bodyOsc.connect(bodyGain);
+  bodyGain.connect(audioCtx.destination);
+  bodyOsc.start(t);
+  bodyOsc.stop(t + TYPING_CLICK_BODY_DUR_SEC);
 }
 
 /** Start repeating keyboard-click sound. Call on agentToolStart. */

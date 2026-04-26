@@ -116,10 +116,13 @@ export const TOOL_START_NOTE_HZ = 523.25; // C5
 export const TOOL_START_NOTE_DURATION_SEC = 0.055;
 export const TOOL_START_VOLUME = 0.06;
 
-// ── Typing Loop (repeated click while tool is active) ───────
-export const TYPING_CLICK_INTERVAL_MS = 120;
-export const TYPING_CLICK_DURATION_SEC = 0.018;
-export const TYPING_CLICK_VOLUME = 0.04;
+// ── Typing Loop (mechanical keyboard click) ─────────────────
+export const TYPING_CLICK_INTERVAL_MS = 185; // ms between keystrokes
+export const TYPING_CLICK_NOISE_DUR_SEC = 0.012; // tick transient (noise)
+export const TYPING_CLICK_BODY_DUR_SEC = 0.055; // thock body (tone)
+export const TYPING_CLICK_BODY_HZ = 620; // resonance frequency
+export const TYPING_CLICK_NOISE_VOLUME = 0.09;
+export const TYPING_CLICK_BODY_VOLUME = 0.05;
 
 // ── Agent Spawn Sound (ascending C5→E5→G5 arpeggio) ────────
 export const SPAWN_NOTE_1_HZ = 523.25; // C5
