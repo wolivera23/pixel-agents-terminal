@@ -15,18 +15,13 @@
 
 import * as http from 'http';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import {
-  copyHookScript,
-  installHooks,
-} from './providers/hook/claude/claudeHookInstaller.js';
+import { copyHookScript, installHooks } from './providers/hook/claude/claudeHookInstaller.js';
 import { PixelAgentsServer } from './server.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// When running via tsx the source lives at server/src/standalone.ts → root is ../../
+// __dirname is available in CJS (the target this project compiles to)
+// When running via tsx: server/src/standalone.ts → root is ../../
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
 const WS_PORT = parseInt(process.env.PIXEL_AGENTS_WS_PORT ?? '3000', 10);
@@ -50,10 +45,7 @@ const sessionToAgentId = new Map<string, number>();
 const agentCurrentToolId = new Map<number, string>();
 let nextAgentId = 1;
 
-function getOrCreateAgent(
-  sessionId: string,
-  cwd?: string,
-): { id: number; isNew: boolean } {
+function getOrCreateAgent(sessionId: string, cwd?: string): { id: number; isNew: boolean } {
   if (sessionToAgentId.has(sessionId)) {
     return { id: sessionToAgentId.get(sessionId)!, isNew: false };
   }
@@ -66,10 +58,7 @@ function getOrCreateAgent(
 
 // ── Hook event → webview message mapping ─────────────────────────────────────
 
-function handleHookEvent(
-  _providerId: string,
-  event: Record<string, unknown>,
-): void {
+function handleHookEvent(_providerId: string, event: Record<string, unknown>): void {
   const sessionId = event.session_id as string | undefined;
   const hookName = event.hook_event_name as string | undefined;
   if (!sessionId || !hookName) return;
@@ -148,9 +137,7 @@ async function main(): Promise<void> {
     installHooks();
   } catch (e) {
     console.warn('[Pixel Agents] Could not auto-install hooks:', e);
-    console.warn(
-      '[Pixel Agents] Run `npm run build` first so dist/hooks/claude-hook.js exists.',
-    );
+    console.warn('[Pixel Agents] Run `npm run build` first so dist/hooks/claude-hook.js exists.');
   }
 
   // Start hook receiver (manages ~/.pixel-agents/server.json for hook scripts)
