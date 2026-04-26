@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import type { ToolActivity } from '../office/types.js';
+import type { Agent, AgentEvent, TimelineEvent } from '../types/agentControl.js';
 import { vscode } from '../vscodeApi.js';
 import { Button } from './ui/Button.js';
 
@@ -22,6 +23,9 @@ interface DebugViewProps {
   agentTools: Record<number, ToolActivity[]>;
   agentStatuses: Record<number, string>;
   subagentTools: Record<number, Record<string, ToolActivity[]>>;
+  normalizedAgents: Agent[];
+  normalizedTimeline: TimelineEvent[];
+  recentAgentEvents: AgentEvent[];
   onSelectAgent: (id: number) => void;
 }
 
@@ -58,12 +62,23 @@ function formatTimeAgo(ms: number): string {
   return `${Math.floor(seconds / 3600)}h ago`;
 }
 
+function formatTimestamp(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 export function DebugView({
   agents,
   selectedAgent,
   agentTools,
   agentStatuses,
   subagentTools,
+  normalizedAgents,
+  normalizedTimeline,
+  recentAgentEvents,
   onSelectAgent,
 }: DebugViewProps) {
   const [diagnostics, setDiagnostics] = useState<Record<number, AgentDiagnostics>>({});
@@ -180,7 +195,79 @@ export function DebugView({
     <div className="absolute inset-0 overflow-auto bg-bg z-15">
       <div className="px-12 py-6 text-2xl">
         <h2 className="text-3xl font-bold mb-8">Debug View</h2>
-        <div className="flex flex-col gap-6">{agents.map(renderAgentCard)}</div>
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div className="flex flex-col gap-6">{agents.map(renderAgentCard)}</div>
+
+          <div className="flex flex-col gap-6">
+            <div className="rounded-none py-6 px-8 border-2 border-border">
+              <h3 className="text-xl mb-4">Normalized Agents</h3>
+              <div className="flex flex-col gap-3 text-sm">
+                {normalizedAgents.length === 0 && (
+                  <span className="opacity-60">No normalized agents yet.</span>
+                )}
+                {normalizedAgents.map((agent) => (
+                  <div key={agent.id} className="border-b border-white/8 pb-3 last:border-b-0">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="font-bold">{agent.name}</span>
+                      <span className="opacity-70">{agent.state}</span>
+                    </div>
+                    <div className="opacity-70">
+                      id={agent.id} | source={agent.source ?? 'unknown'}
+                    </div>
+                    {agent.lastAction && <div className="opacity-80">{agent.lastAction}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-none py-6 px-8 border-2 border-border">
+              <h3 className="text-xl mb-4">Normalized Timeline</h3>
+              <div className="flex flex-col gap-3 text-sm">
+                {normalizedTimeline.length === 0 && (
+                  <span className="opacity-60">No normalized timeline entries yet.</span>
+                )}
+                {normalizedTimeline
+                  .slice()
+                  .reverse()
+                  .map((event) => (
+                    <div key={event.id} className="border-b border-white/8 pb-3 last:border-b-0">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="font-bold">{event.message}</span>
+                        <span className="opacity-60">{formatTimestamp(event.timestamp)}</span>
+                      </div>
+                      <div className="opacity-70">
+                        agent={event.agentId} | severity={event.severity}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className="rounded-none py-6 px-8 border-2 border-border">
+              <h3 className="text-xl mb-4">Recent Agent Events</h3>
+              <div className="flex flex-col gap-3 text-sm">
+                {recentAgentEvents.length === 0 && (
+                  <span className="opacity-60">No normalized events yet.</span>
+                )}
+                {recentAgentEvents
+                  .slice()
+                  .reverse()
+                  .map((event) => (
+                    <div key={event.id} className="border-b border-white/8 pb-3 last:border-b-0">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="font-bold">{event.title}</span>
+                        <span className="opacity-60">{formatTimestamp(event.timestamp)}</span>
+                      </div>
+                      <div className="opacity-70">
+                        type={event.type} | agent={event.agentId} | severity={event.severity}
+                      </div>
+                      {event.description && <div className="opacity-80">{event.description}</div>}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -52,21 +52,25 @@ export class PixelAgentsServer {
   }
 
   /**
-   * Start the HTTP server. If another instance is already running (detected via
-   * server.json PID check), reuses that server's config without starting a new one.
+   * Start the HTTP server.
+   * @param forceOwn - If true, always start a new server and take ownership of server.json
+   *   (used by standalone mode to ensure hooks reach the browser-facing server, not VS Code).
+   *   If false (default), reuses a running instance when detected via server.json PID check.
    * @returns The server config (port, token) for hook script discovery.
    */
-  async start(): Promise<ServerConfig> {
-    // Check if another instance already has a server running
-    const existing = this.readServerJson();
-    if (existing && isProcessRunning(existing.pid)) {
-      // Another VS Code window owns the server, reuse its config
-      this.config = existing;
-      this.ownsServer = false;
-      console.log(
-        `[Pixel Agents] Reusing existing server on port ${existing.port} (PID ${existing.pid})`,
-      );
-      return existing;
+  async start(forceOwn = false): Promise<ServerConfig> {
+    // Check if another instance already has a server running (skip in forceOwn mode)
+    if (!forceOwn) {
+      const existing = this.readServerJson();
+      if (existing && isProcessRunning(existing.pid)) {
+        // Another VS Code window owns the server, reuse its config
+        this.config = existing;
+        this.ownsServer = false;
+        console.log(
+          `[Pixel Agents] Reusing existing server on port ${existing.port} (PID ${existing.pid})`,
+        );
+        return existing;
+      }
     }
 
     // Start our own server

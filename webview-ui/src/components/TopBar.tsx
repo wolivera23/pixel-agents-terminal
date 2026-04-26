@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { ZOOM_MAX, ZOOM_MIN } from '../constants.js';
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
+import { unlockAudio } from '../notificationSound.js';
 import { vscode } from '../vscodeApi.js';
 import { Button } from './ui/Button.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
@@ -24,6 +25,10 @@ interface TopBarProps {
   workspaceFolders: WorkspaceFolder[];
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  currentVersion?: string;
+  lastSeenVersion?: string;
+  onDismissVersion?: () => void;
+  onOpenChangelog?: () => void;
 }
 
 export function TopBar({
@@ -110,7 +115,10 @@ export function TopBar({
   };
 
   return (
-    <div className="flex items-center h-48 px-12 gap-8 bg-bg-dark border-b-2 border-border flex-shrink-0">
+    <div
+      className="flex items-center h-48 px-12 gap-8 bg-bg-dark border-b-2 border-border flex-shrink-0"
+      onMouseDown={unlockAudio}
+    >
       {/* Logo */}
       <span className="text-base text-accent select-none whitespace-nowrap">Pixel Agents</span>
 

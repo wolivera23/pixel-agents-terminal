@@ -3,10 +3,10 @@ import { test } from 'node:test';
 
 import { domainReducer, initialDomainState } from '../src/domain/reducer.ts';
 import {
+  AgentEventType,
   AgentRuntimeState,
   AgentSource,
   AgentType,
-  AgentEventType,
   EventSeverity,
 } from '../src/domain/types.ts';
 

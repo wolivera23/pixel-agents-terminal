@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
@@ -22,6 +22,7 @@ import { useAgentControlCenter } from './hooks/useAgentControlCenter.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
+import { useNormalizedAgentDebugState } from './hooks/useNormalizedAgentDebugState.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -92,14 +93,42 @@ function App() {
     hooksEnabled,
     setHooksEnabled,
     hooksInfoShown,
+    normalizedAgents,
+    normalizedTimeline,
+    recentAgentEvents,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
+  const normalizedDebugState = useNormalizedAgentDebugState(
+    normalizedAgents,
+    normalizedTimeline,
+    recentAgentEvents,
+  );
+  const normalizedLegacyInput = useMemo(
+    () => ({
+      agents: normalizedDebugState.agents,
+      events: normalizedDebugState.recentEvents,
+      timeline: normalizedDebugState.timeline,
+    }),
+    [normalizedDebugState.agents, normalizedDebugState.recentEvents, normalizedDebugState.timeline],
+  );
 
   // Domain store — bridges legacy state into normalized Agent/Timeline/Alert model
-  const domainState = useAgentControlCenter(agents, agentTools, agentStatuses, getOfficeState);
+  const domainState = useAgentControlCenter(
+    agents,
+    agentTools,
+    agentStatuses,
+    getOfficeState,
+    normalizedLegacyInput,
+  );
   const realAgents = selectRealAgents(domainState);
   const pendingPermissions = selectPendingPermissions(domainState);
   const recentTimeline = selectRecentTimeline(domainState);
   const activeAlerts = selectActiveAlerts(domainState);
+  const fallbackDashboardAgents = normalizedDebugState.agents.filter(
+    (agent) => agent.type === 'dev',
+  );
+  const dashboardAgents = realAgents.length > 0 ? realAgents : fallbackDashboardAgents;
+  const dashboardTimeline =
+    recentTimeline.length > 0 ? recentTimeline : normalizedDebugState.timeline.slice().reverse();
 
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
   const showMigrationNotice = layoutWasReset && !migrationNoticeDismissed;
@@ -110,7 +139,7 @@ function App() {
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
-  const [isDashboardOpen, setIsDashboardOpen] = useState(true);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [selectedDomainAgent, setSelectedDomainAgent] = useState<string | undefined>();
 
   const currentMajorMinor = toMajorMinor(extensionVersion);
@@ -231,7 +260,7 @@ function App() {
             style={{ width: 220 }}
           >
             <AgentGrid
-              agents={realAgents}
+              agents={dashboardAgents}
               pendingPermissions={pendingPermissions}
               selectedAgentId={selectedDomainAgent}
               onSelectAgent={setSelectedDomainAgent}
@@ -313,6 +342,9 @@ function App() {
               agentTools={agentTools}
               agentStatuses={agentStatuses}
               subagentTools={subagentTools}
+              normalizedAgents={normalizedDebugState.agents}
+              normalizedTimeline={normalizedDebugState.timeline}
+              recentAgentEvents={normalizedDebugState.recentEvents}
               onSelectAgent={handleSelectAgent}
             />
           )}
@@ -353,7 +385,7 @@ function App() {
             style={{ width: 220 }}
           >
             <div className="flex-1 overflow-hidden">
-              <TimelinePanel events={recentTimeline} />
+              <TimelinePanel events={dashboardTimeline} />
             </div>
             {activeAlerts.length > 0 && (
               <div className="flex-shrink-0 border-t-2 border-border overflow-hidden">

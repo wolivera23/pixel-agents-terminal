@@ -19,7 +19,9 @@ export type DomainAction =
   | { type: 'UPSERT_AGENTS'; agents: Agent[] }
   | { type: 'PATCH_AGENTS'; agents: Array<{ id: string } & Partial<Omit<Agent, 'id'>>> }
   | { type: 'REMOVE_AGENT'; agentId: string }
+  | { type: 'REPLACE_TIMELINE'; events: TimelineEvent[] }
   | { type: 'ADD_TIMELINE'; events: TimelineEvent[] }
+  | { type: 'REPLACE_ALERTS'; alerts: Alert[] }
   | { type: 'ADD_ALERTS'; alerts: Alert[] }
   | { type: 'UPSERT_PERMISSIONS'; permissions: PermissionRequest[] }
   | { type: 'SET_PERMISSIONS'; permissions: PermissionRequest[] };
@@ -54,11 +56,23 @@ export function domainReducer(state: DomainState, action: DomainAction): DomainS
     case 'REMOVE_AGENT': {
       return { ...state, agents: state.agents.filter((a) => a.id !== action.agentId) };
     }
+    case 'REPLACE_TIMELINE': {
+      return {
+        ...state,
+        timeline: action.events.slice(-MAX_TIMELINE),
+      };
+    }
     case 'ADD_TIMELINE': {
       const combined = [...state.timeline, ...action.events];
       return {
         ...state,
         timeline: combined.length > MAX_TIMELINE ? combined.slice(-MAX_TIMELINE) : combined,
+      };
+    }
+    case 'REPLACE_ALERTS': {
+      return {
+        ...state,
+        alerts: action.alerts.slice(-MAX_ALERTS),
       };
     }
     case 'ADD_ALERTS': {

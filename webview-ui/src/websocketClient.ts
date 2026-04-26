@@ -27,6 +27,14 @@ export function sendDomainMessage(msg: object): void {
   }
 }
 
+/**
+ * Request the server to replay existing agents and send the current domain snapshot.
+ * Called after React mounts so the message listener is guaranteed to be active.
+ */
+export function requestServerSync(): void {
+  sendDomainMessage({ type: 'requestSync' });
+}
+
 function attachMessageHandler(ws: WebSocket): void {
   ws.addEventListener('message', (event) => {
     try {

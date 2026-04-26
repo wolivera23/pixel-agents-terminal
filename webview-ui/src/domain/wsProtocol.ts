@@ -58,3 +58,7 @@ export interface DomainPermissionDecisionMessage {
   permissionId: string;
   decision: 'approved' | 'rejected';
 }
+
+export interface DomainSyncRequestMessage {
+  type: 'requestSync';
+}

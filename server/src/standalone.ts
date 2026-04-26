@@ -148,7 +148,9 @@ async function main(): Promise<void> {
   // Start hook receiver (manages ~/.pixel-agents/server.json for hook scripts)
   const pixelServer = new PixelAgentsServer();
   pixelServer.onHookEvent(handleHookEvent);
-  const serverConfig = await pixelServer.start();
+  // forceOwn=true: standalone always takes ownership of server.json so hooks
+  // reach this process (not a VS Code extension that may also be running).
+  const serverConfig = await pixelServer.start(true);
 
   // HTTP + WebSocket server (browser connects here)
   const httpServer = http.createServer((_req, res) => {
@@ -163,22 +165,27 @@ async function main(): Promise<void> {
     clients.add(ws);
     console.log(`[Pixel Agents] Browser connected (${clients.size} active)`);
 
-    // Replay existing agents so a reconnecting browser doesn't miss agentCreated
-    for (const agent of domainBridge.buildLegacyReplayAgents()) {
-      ws.send(
-        JSON.stringify({
-          type: 'agentCreated',
-          id: agent.agentId,
-          folderName: agent.folderName,
-          providerId: agent.providerId,
-        }),
-      );
+    function sendSync(): void {
+      for (const agent of domainBridge.buildLegacyReplayAgents()) {
+        ws.send(
+          JSON.stringify({
+            type: 'agentCreated',
+            id: agent.agentId,
+            folderName: agent.folderName,
+            providerId: agent.providerId,
+          }),
+        );
+      }
+      ws.send(JSON.stringify(domainBridge.buildSnapshot()));
     }
-    ws.send(JSON.stringify(domainBridge.buildSnapshot()));
 
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(raw.toString()) as DomainWsClientMessage;
+        if (msg.type === 'requestSync') {
+          sendSync();
+          return;
+        }
         for (const domainMsg of domainBridge.handleClientMessage(msg)) {
           broadcast(domainMsg);
         }

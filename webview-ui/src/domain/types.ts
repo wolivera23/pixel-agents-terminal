@@ -54,6 +54,18 @@ export const EventSeverity = {
 } as const;
 export type EventSeverity = (typeof EventSeverity)[keyof typeof EventSeverity];
 
+export interface AgentEvent {
+  id: string;
+  timestamp: number;
+  source: AgentSource;
+  agentId: string;
+  type: AgentEventType;
+  severity: EventSeverity;
+  title: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface Agent {
   id: string;
   name: string;

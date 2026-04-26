@@ -56,4 +56,8 @@ export type DomainWsMessage =
   | DomainAlertRaisedMessage
   | DomainPermissionsMessage;
 
-export type DomainWsClientMessage = DomainPermissionDecisionRequest;
+export interface DomainSyncRequestMessage {
+  type: 'requestSync';
+}
+
+export type DomainWsClientMessage = DomainPermissionDecisionRequest | DomainSyncRequestMessage;

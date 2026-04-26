@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { type AgentMap, reduceAgentEvent } from '../core/agentState.js';
+import { normalizeToAgentEvent } from '../core/eventNormalizer.js';
+import { agentEventToTimelineEvent } from '../core/timeline.js';
 // Dev speech and context_warning are now driven by useAgentControlCenter via speechMapper.
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -10,6 +13,8 @@ import { setCharacterTemplates } from '../office/sprites/spriteData.js';
 import { extractToolName } from '../office/toolUtils.js';
 import type { OfficeLayout, ToolActivity } from '../office/types.js';
 import { setWallSprites } from '../office/wallTiles.js';
+import { isBrowserRuntime } from '../runtime.js';
+import type { AgentEvent, TimelineEvent } from '../types/agentControl.js';
 import { vscode } from '../vscodeApi.js';
 
 export interface SubagentCharacter {
@@ -67,6 +72,29 @@ interface ExtensionMessageState {
   hooksEnabled: boolean;
   setHooksEnabled: (v: boolean) => void;
   hooksInfoShown: boolean;
+  normalizedAgents: AgentMap;
+  normalizedTimeline: TimelineEvent[];
+  recentAgentEvents: AgentEvent[];
+}
+
+const NORMALIZED_EVENT_HISTORY_LIMIT = 100;
+const NORMALIZED_TIMELINE_LIMIT = 200;
+
+function appendBounded<T>(items: T[], nextItem: T, limit: number): T[] {
+  if (items.length >= limit) {
+    return [...items.slice(items.length - limit + 1), nextItem];
+  }
+  return [...items, nextItem];
+}
+
+function shouldAppendNormalizedTimelineEvent(event: AgentEvent): boolean {
+  if (event.type === 'agent_action' && event.title === 'Token usage updated') {
+    return false;
+  }
+  if (event.type === 'agent_action' && event.title === 'Agent event') {
+    return false;
+  }
+  return true;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -104,6 +132,9 @@ export function useExtensionMessages(
   const [alwaysShowLabels, setAlwaysShowLabels] = useState(false);
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
+  const [normalizedAgents, setNormalizedAgents] = useState<AgentMap>({});
+  const [normalizedTimeline, setNormalizedTimeline] = useState<TimelineEvent[]>([]);
+  const [recentAgentEvents, setRecentAgentEvents] = useState<AgentEvent[]>([]);
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
@@ -121,6 +152,24 @@ export function useExtensionMessages(
     const handler = (e: MessageEvent) => {
       const msg = e.data;
       const os = getOfficeState();
+      const normalizedEvent = normalizeToAgentEvent(msg);
+
+      if (normalizedEvent) {
+        setRecentAgentEvents((prev) =>
+          appendBounded(prev, normalizedEvent, NORMALIZED_EVENT_HISTORY_LIMIT),
+        );
+        setNormalizedAgents((prev) => reduceAgentEvent(prev, normalizedEvent));
+        if (shouldAppendNormalizedTimelineEvent(normalizedEvent)) {
+          const timelineEvent = agentEventToTimelineEvent(normalizedEvent);
+          setNormalizedTimeline((prev) =>
+            appendBounded(prev, timelineEvent, NORMALIZED_TIMELINE_LIMIT),
+          );
+        }
+
+        if (import.meta.env.DEV) {
+          console.debug('[Pixel Agents] Normalized AgentEvent', normalizedEvent);
+        }
+      }
 
       if (msg.type === 'layoutLoaded') {
         // Skip external layout updates while editor has unsaved changes
@@ -182,6 +231,12 @@ export function useExtensionMessages(
         saveAgentSeats(os);
       } else if (msg.type === 'agentClosed') {
         const id = msg.id as number;
+        setNormalizedAgents((prev) => {
+          if (!(String(id) in prev)) return prev;
+          const next = { ...prev };
+          delete next[String(id)];
+          return next;
+        });
         setAgents((prev) => prev.filter((a) => a !== id));
         setSelectedAgent((prev) => (prev === id ? null : prev));
         setAgentTools((prev) => {
@@ -514,6 +569,13 @@ export function useExtensionMessages(
     };
     window.addEventListener('message', handler);
     vscode.postMessage({ type: 'webviewReady' });
+    // In browser/standalone mode, request server to replay existing agents.
+    // This runs after the listener is registered, so no messages are lost on F5.
+    if (isBrowserRuntime) {
+      void import('../websocketClient.js').then(({ requestServerSync }) => {
+        requestServerSync();
+      });
+    }
     return () => window.removeEventListener('message', handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);
@@ -538,5 +600,8 @@ export function useExtensionMessages(
     hooksEnabled,
     setHooksEnabled,
     hooksInfoShown,
+    normalizedAgents,
+    normalizedTimeline,
+    recentAgentEvents,
   };
 }

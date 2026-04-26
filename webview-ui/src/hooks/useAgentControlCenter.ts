@@ -4,8 +4,18 @@ import { MAX_CONTEXT_TOKENS, TOKEN_WARN_THRESHOLD } from '../constants.js';
 import { rebuildSnapshotCaches } from '../domain/cacheSync.js';
 import type { DomainState } from '../domain/reducer.js';
 import { domainReducer, initialDomainState } from '../domain/reducer.js';
-import { mapDomainEventToSpeech, mapStateTransitionToSpeech } from '../domain/speechMapper.js';
-import type { Agent, Alert, PermissionRequest, TimelineEvent } from '../domain/types.js';
+import {
+  mapContextWarningToSpeech,
+  mapDomainEventToSpeech,
+  mapStateTransitionToSpeech,
+} from '../domain/speechMapper.js';
+import type {
+  Agent,
+  AgentEvent,
+  Alert,
+  PermissionRequest,
+  TimelineEvent,
+} from '../domain/types.js';
 import {
   AgentEventType,
   AgentRuntimeState,
@@ -25,6 +35,76 @@ import type {
 import { DOMAIN_WS_PROTOCOL_VERSION } from '../domain/wsProtocol.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import type { ToolActivity } from '../office/types.js';
+
+interface LegacyNormalizedInput {
+  agents: Agent[];
+  events: AgentEvent[];
+  timeline: TimelineEvent[];
+}
+
+function buildLegacyAlertsFromAgentEvents(events: AgentEvent[]): Alert[] {
+  return events
+    .filter((event) => {
+      if (
+        event.type === AgentEventType.PERMISSION_REQUEST ||
+        event.type === AgentEventType.ERROR ||
+        event.type === AgentEventType.BLOCKED ||
+        event.type === AgentEventType.LOOP_DETECTED ||
+        event.type === AgentEventType.CONTEXT_WARNING ||
+        event.type === AgentEventType.TASK_FAILED
+      ) {
+        return true;
+      }
+      return (
+        event.severity === EventSeverity.WARNING ||
+        event.severity === EventSeverity.ERROR ||
+        event.severity === EventSeverity.CRITICAL
+      );
+    })
+    .slice(-50)
+    .map((event) => ({
+      id: `legacy-alert:${event.id}`,
+      timestamp: event.timestamp,
+      agentId: event.agentId,
+      severity: event.severity,
+      kind: event.type,
+      title: event.title,
+      description: event.description,
+      metadata: event.metadata,
+    }));
+}
+
+function buildLegacyPendingPermissionsFromAgentEvents(events: AgentEvent[]): PermissionRequest[] {
+  const pending = new Map<string, PermissionRequest>();
+
+  for (const event of events) {
+    const id = `perm:${event.agentId}`;
+    if (event.type === AgentEventType.PERMISSION_REQUEST) {
+      pending.set(id, {
+        id,
+        agentId: event.agentId,
+        source: event.source,
+        requestedAt: event.timestamp,
+        status: 'pending',
+        title: event.title,
+        description: event.description,
+        metadata: event.metadata,
+      });
+      continue;
+    }
+
+    if (
+      event.type === AgentEventType.PERMISSION_APPROVED ||
+      event.type === AgentEventType.PERMISSION_REJECTED ||
+      event.type === AgentEventType.TASK_COMPLETED ||
+      event.type === AgentEventType.AGENT_IDLE
+    ) {
+      pending.delete(id);
+    }
+  }
+
+  return [...pending.values()].sort((a, b) => b.requestedAt - a.requestedAt);
+}
 
 // ── Legacy bridge helpers ─────────────────────────────────────────────────────
 
@@ -90,6 +170,7 @@ export function useAgentControlCenter(
   agentTools: Record<number, ToolActivity[]>,
   agentStatuses: Record<number, string>,
   getOfficeState: () => OfficeState,
+  legacyNormalized?: LegacyNormalizedInput,
 ): DomainState {
   const [state, dispatch] = useReducer(domainReducer, initialDomainState);
 
@@ -104,6 +185,7 @@ export function useAgentControlCenter(
   const contextWarnedRef = useRef<Set<string>>(new Set());
   const contextUsageRef = useRef<Map<string, number>>(new Map());
   const prevDomainStatesRef = useRef<Map<string, AgentRuntimeState>>(new Map());
+  const processedLegacyEventIdsRef = useRef<Set<string>>(new Set());
 
   // ── Domain + legacy-context listener ─────────────────────────────────────
   useEffect(() => {
@@ -292,19 +374,45 @@ export function useAgentControlCenter(
         contextUsage: contextUsageRef.current.get(agentIdStr),
       } satisfies Agent;
     });
+    const effectiveAgents =
+      legacyNormalized && legacyNormalized.agents.length > 0
+        ? legacyNormalized.agents
+        : domainAgents;
+    const hasNormalizedTimeline =
+      Boolean(legacyNormalized) && (legacyNormalized?.timeline.length ?? 0) > 0;
+    const hasNormalizedEvents =
+      Boolean(legacyNormalized) && (legacyNormalized?.events.length ?? 0) > 0;
 
     if (!hasDomainSourceRef.current) {
-      dispatch({ type: 'UPSERT_AGENTS', agents: domainAgents });
+      dispatch({ type: 'UPSERT_AGENTS', agents: effectiveAgents });
+      if (hasNormalizedTimeline) {
+        dispatch({ type: 'REPLACE_TIMELINE', events: legacyNormalized?.timeline ?? [] });
+      }
+      if (hasNormalizedEvents) {
+        dispatch({
+          type: 'REPLACE_ALERTS',
+          alerts: buildLegacyAlertsFromAgentEvents(legacyNormalized?.events ?? []),
+        });
+        dispatch({
+          type: 'SET_PERMISSIONS',
+          permissions: buildLegacyPendingPermissionsFromAgentEvents(legacyNormalized?.events ?? []),
+        });
+        for (const event of legacyNormalized?.events ?? []) {
+          if (processedLegacyEventIdsRef.current.has(event.id)) continue;
+          processedLegacyEventIdsRef.current.add(event.id);
+          mapDomainEventToSpeech(event.type);
+        }
+      }
 
       const timelineEvents: TimelineEvent[] = [];
       const alerts: Alert[] = [];
 
-      for (const agent of domainAgents) {
+      for (const agent of effectiveAgents) {
         const numId = Number(agent.id);
         const prev = prevLegacyStatesRef.current[numId];
 
         if (prev !== agent.state) {
-          if (prev !== undefined) {
+          if (prev !== undefined && !hasNormalizedTimeline) {
             const severity = stateToSeverity(agent.state);
             const message = stateToTimelineMessage(agent.name, agent.state);
             const now = Date.now();
@@ -351,40 +459,42 @@ export function useAgentControlCenter(
       }
 
       if (timelineEvents.length > 0) dispatch({ type: 'ADD_TIMELINE', events: timelineEvents });
-      if (alerts.length > 0) dispatch({ type: 'ADD_ALERTS', alerts });
+      if (alerts.length > 0 && !hasNormalizedEvents) dispatch({ type: 'ADD_ALERTS', alerts });
 
       // Synthesize permissions from waiting agents
       const permissions: PermissionRequest[] = [];
-      for (const agent of domainAgents) {
-        const permId = `perm:${agent.id}`;
-        if (agent.state === AgentRuntimeState.WAITING_PERMISSION) {
-          if (!seenPermissionsRef.current.has(permId)) {
-            seenPermissionsRef.current.add(permId);
-            permissions.push({
-              id: permId,
-              agentId: agent.id,
-              source: agent.source ?? AgentSource.CLAUDE,
-              requestedAt: Date.now(),
-              status: 'pending',
-              title: 'Permiso requerido',
-              description: agent.currentTask,
-            });
+      if (!hasNormalizedEvents) {
+        for (const agent of effectiveAgents) {
+          const permId = `perm:${agent.id}`;
+          if (agent.state === AgentRuntimeState.WAITING_PERMISSION) {
+            if (!seenPermissionsRef.current.has(permId)) {
+              seenPermissionsRef.current.add(permId);
+              permissions.push({
+                id: permId,
+                agentId: agent.id,
+                source: agent.source ?? AgentSource.CLAUDE,
+                requestedAt: Date.now(),
+                status: 'pending',
+                title: 'Permiso requerido',
+                description: agent.currentTask,
+              });
+            }
+          } else {
+            seenPermissionsRef.current.delete(permId);
           }
-        } else {
-          seenPermissionsRef.current.delete(permId);
         }
       }
       if (permissions.length > 0) dispatch({ type: 'UPSERT_PERMISSIONS', permissions });
     } else {
       dispatch({
         type: 'PATCH_AGENTS',
-        agents: domainAgents.map((agent) => ({
+        agents: effectiveAgents.map((agent) => ({
           id: agent.id,
           contextUsage: agent.contextUsage,
         })),
       });
     }
-  }, [legacyAgents, agentTools, agentStatuses, getOfficeState]);
+  }, [legacyAgents, agentTools, agentStatuses, getOfficeState, legacyNormalized]);
 
   return state;
 }
