@@ -20,6 +20,9 @@ import {
   TOOL_START_NOTE_DURATION_SEC,
   TOOL_START_NOTE_HZ,
   TOOL_START_VOLUME,
+  TYPING_CLICK_DURATION_SEC,
+  TYPING_CLICK_INTERVAL_MS,
+  TYPING_CLICK_VOLUME,
 } from './constants.js';
 
 let soundEnabled = true;
@@ -149,6 +152,53 @@ export async function playAgentSpawnSound(): Promise<void> {
     );
   } catch {
     // Audio not available
+  }
+}
+
+// ── Typing loop ───────────────────────────────────────────────────────────────
+
+let typingInterval: ReturnType<typeof setInterval> | null = null;
+
+function playTypingClick(): void {
+  if (!audioCtx || !soundEnabled) return;
+  const t = audioCtx.currentTime;
+  // White-noise burst: fill a short buffer with random samples
+  const bufLen = Math.ceil(audioCtx.sampleRate * TYPING_CLICK_DURATION_SEC);
+  const buffer = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) {
+    data[i] = (Math.random() * 2 - 1) * TYPING_CLICK_VOLUME;
+  }
+  // Quick exponential fade-out
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(1, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + TYPING_CLICK_DURATION_SEC);
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(gain);
+  gain.connect(audioCtx.destination);
+  src.start(t);
+  src.stop(t + TYPING_CLICK_DURATION_SEC);
+}
+
+/** Start repeating keyboard-click sound. Call on agentToolStart. */
+export function startTypingLoop(): void {
+  if (!soundEnabled) return;
+  stopTypingLoop();
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') {
+    void audioCtx.resume();
+  }
+  playTypingClick();
+  typingInterval = setInterval(playTypingClick, TYPING_CLICK_INTERVAL_MS);
+}
+
+/** Stop repeating keyboard-click sound. Call on agentToolDone / Stop. */
+export function stopTypingLoop(): void {
+  if (typingInterval !== null) {
+    clearInterval(typingInterval);
+    typingInterval = null;
   }
 }
 

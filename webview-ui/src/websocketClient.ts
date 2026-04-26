@@ -2,6 +2,8 @@ import {
   playAgentSpawnSound,
   playToolStartSound,
   setSoundEnabled,
+  startTypingLoop,
+  stopTypingLoop,
   unlockAudio,
 } from './notificationSound.js';
 
@@ -65,7 +67,17 @@ export function tryConnectWebSocket(port = 3000): Promise<boolean> {
 
           // Trigger sounds before dispatching so they fire as early as possible
           if (data.type === 'agentCreated') void playAgentSpawnSound();
-          if (data.type === 'agentToolStart') void playToolStartSound();
+          if (data.type === 'agentToolStart') {
+            void playToolStartSound();
+            startTypingLoop();
+          }
+          if (
+            data.type === 'agentToolDone' ||
+            data.type === 'agentToolsClear' ||
+            (data.type === 'agentStatus' && data.status === 'waiting')
+          ) {
+            stopTypingLoop();
+          }
 
           window.dispatchEvent(new MessageEvent('message', { data }));
         } catch {

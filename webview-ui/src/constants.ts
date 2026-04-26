@@ -116,6 +116,11 @@ export const TOOL_START_NOTE_HZ = 523.25; // C5
 export const TOOL_START_NOTE_DURATION_SEC = 0.055;
 export const TOOL_START_VOLUME = 0.06;
 
+// ── Typing Loop (repeated click while tool is active) ───────
+export const TYPING_CLICK_INTERVAL_MS = 120;
+export const TYPING_CLICK_DURATION_SEC = 0.018;
+export const TYPING_CLICK_VOLUME = 0.04;
+
 // ── Agent Spawn Sound (ascending C5→E5→G5 arpeggio) ────────
 export const SPAWN_NOTE_1_HZ = 523.25; // C5
 export const SPAWN_NOTE_2_HZ = 659.25; // E5
