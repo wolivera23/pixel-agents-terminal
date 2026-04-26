@@ -22,6 +22,7 @@ import { OfficeState } from './office/engine/officeState.js';
 import { isRotatable } from './office/layout/furnitureCatalog.js';
 import { EditTool } from './office/types.js';
 import { isBrowserRuntime } from './runtime.js';
+import { isStandaloneMode } from './standaloneState.js';
 import { vscode } from './vscodeApi.js';
 
 // Game state lives outside React — updated imperatively by message handlers
@@ -37,11 +38,25 @@ function getOfficeState(): OfficeState {
 
 function App() {
   // Always dispatch asset init messages in browser runtime (tiles, sprites, layout, settings).
-  // dispatchMockMessages only sends asset data, not agent events — safe to call in
-  // standalone mode too. The WebSocket then adds real Claude Code agent events on top.
+  // In standalone mode, re-dispatch settingsLoaded with soundEnabled: true immediately after,
+  // because dispatchMockMessages sends soundEnabled: false which would override the WS setting.
   useEffect(() => {
     if (isBrowserRuntime) {
-      void import('./browserMock.js').then(({ dispatchMockMessages }) => dispatchMockMessages());
+      void import('./browserMock.js').then(({ dispatchMockMessages }) => {
+        dispatchMockMessages();
+        if (isStandaloneMode) {
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: {
+                type: 'settingsLoaded',
+                soundEnabled: true,
+                extensionVersion: '1.3.0',
+                lastSeenVersion: '1.3.0',
+              },
+            }),
+          );
+        }
+      });
     }
   }, []);
 
