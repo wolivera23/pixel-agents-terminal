@@ -15,7 +15,18 @@ import type { Character, Seat, SpriteData, TileType as TileTypeVal } from '../ty
 import { CharacterState, Direction, TILE_SIZE } from '../types.js';
 
 /** Tools that show reading animation instead of typing */
-const READING_TOOLS = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch']);
+const READING_TOOLS = new Set([
+  // Claude Code tools
+  'Read',
+  'Grep',
+  'Glob',
+  'WebFetch',
+  'WebSearch',
+  // Codex tools
+  'view_image',
+  'web_search',
+  'web.run',
+]);
 
 /** @internal */
 export function isReadingTool(tool: string | null): boolean {

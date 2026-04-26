@@ -65,6 +65,25 @@ export class DomainSessionBridge {
     return [...this.legacyReplayAgents.values()].sort((a, b) => a.agentId - b.agentId);
   }
 
+  removeAgent(agentId: number): DomainWsMessage[] {
+    const id = String(agentId);
+    this.domainStore.removeAgent(id);
+    this.legacyReplayAgents.delete(agentId);
+    for (const [sessionId, mappedAgentId] of this.sessionToAgentId) {
+      if (mappedAgentId === agentId) {
+        this.sessionToAgentId.delete(sessionId);
+        break;
+      }
+    }
+    return [
+      {
+        type: 'domainAgentRemoved',
+        agentId: id,
+      } satisfies DomainAgentRemovedMessage,
+      this.buildPermissionsMessage(),
+    ];
+  }
+
   handleHookEvent(
     providerId: string,
     event: Record<string, unknown>,
@@ -236,6 +255,8 @@ export class DomainSessionBridge {
       lastUpdate: existing?.lastUpdate ?? Date.now(),
       currentTask: existing?.currentTask,
       contextUsage: existing?.contextUsage,
+      inputTokens: existing?.inputTokens,
+      outputTokens: existing?.outputTokens,
       errorCount: existing?.errorCount,
       loopDetected: existing?.loopDetected,
       muted: existing?.muted,

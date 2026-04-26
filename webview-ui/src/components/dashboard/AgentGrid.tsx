@@ -7,6 +7,9 @@ interface AgentGridProps {
   pendingPermissions: PermissionRequest[];
   selectedAgentId?: string;
   onSelectAgent?: (id: string) => void;
+  onFocusAgent?: (id: string) => void;
+  onToggleMuteAgent?: (id: string) => void;
+  onCloseAgent?: (id: string) => void;
 }
 
 export function AgentGrid({
@@ -14,6 +17,9 @@ export function AgentGrid({
   pendingPermissions,
   selectedAgentId,
   onSelectAgent,
+  onFocusAgent,
+  onToggleMuteAgent,
+  onCloseAgent,
 }: AgentGridProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -52,6 +58,9 @@ export function AgentGrid({
               agent={agent}
               isSelected={agent.id === selectedAgentId}
               onClick={() => onSelectAgent?.(agent.id)}
+              onFocus={() => onFocusAgent?.(agent.id)}
+              onToggleMute={() => onToggleMuteAgent?.(agent.id)}
+              onClose={() => onCloseAgent?.(agent.id)}
             />
           ))
         )}

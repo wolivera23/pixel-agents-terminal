@@ -171,6 +171,7 @@ export function useAgentControlCenter(
   agentStatuses: Record<number, string>,
   getOfficeState: () => OfficeState,
   legacyNormalized?: LegacyNormalizedInput,
+  mutedAgentIds?: ReadonlySet<string>,
 ): DomainState {
   const [state, dispatch] = useReducer(domainReducer, initialDomainState);
 
@@ -233,7 +234,9 @@ export function useAgentControlCenter(
         case 'domainEvent': {
           hasDomainSourceRef.current = true;
           const { event } = msg as unknown as DomainEventMessage;
-          mapDomainEventToSpeech(event.type);
+          if (!mutedAgentIds?.has(event.agentId)) {
+            mapDomainEventToSpeech(event.type);
+          }
           break;
         }
 
@@ -302,6 +305,17 @@ export function useAgentControlCenter(
           const usage = total / MAX_CONTEXT_TOKENS;
 
           contextUsageRef.current.set(agentId, usage);
+          dispatch({
+            type: 'PATCH_AGENTS',
+            agents: [
+              {
+                id: agentId,
+                contextUsage: usage,
+                inputTokens: msg.inputTokens as number,
+                outputTokens: msg.outputTokens as number,
+              },
+            ],
+          });
 
           if (!contextWarnedRef.current.has(agentId) && usage >= TOKEN_WARN_THRESHOLD) {
             contextWarnedRef.current.add(agentId);
@@ -324,7 +338,9 @@ export function useAgentControlCenter(
             };
             dispatch({ type: 'ADD_TIMELINE', events: [warnTimeline] });
             dispatch({ type: 'ADD_ALERTS', alerts: [warnAlert] });
-            mapContextWarningToSpeech();
+            if (!mutedAgentIds?.has(agentId)) {
+              mapContextWarningToSpeech();
+            }
           }
           break;
         }
@@ -343,7 +359,7 @@ export function useAgentControlCenter(
       window.removeEventListener('message', handler);
       window.removeEventListener('pixelagents:ws-disconnected', onDisconnect);
     };
-  }, []);
+  }, [mutedAgentIds]);
 
   // ── Legacy bridge ─────────────────────────────────────────────────────────
   // Always upserts agents (canvas needs them).
@@ -371,7 +387,14 @@ export function useAgentControlCenter(
         lastAction: currentTool?.status ?? undefined,
         lastUpdate: observedAt,
         currentTask: currentTool?.status ?? undefined,
-        contextUsage: contextUsageRef.current.get(agentIdStr),
+        contextUsage:
+          contextUsageRef.current.get(agentIdStr) ??
+          (ch && ch.inputTokens + ch.outputTokens > 0
+            ? (ch.inputTokens + ch.outputTokens) / MAX_CONTEXT_TOKENS
+            : undefined),
+        inputTokens: ch?.inputTokens,
+        outputTokens: ch?.outputTokens,
+        muted: mutedAgentIds?.has(agentIdStr),
       } satisfies Agent;
     });
     const effectiveAgents =
@@ -400,7 +423,9 @@ export function useAgentControlCenter(
         for (const event of legacyNormalized?.events ?? []) {
           if (processedLegacyEventIdsRef.current.has(event.id)) continue;
           processedLegacyEventIdsRef.current.add(event.id);
-          mapDomainEventToSpeech(event.type);
+          if (!mutedAgentIds?.has(event.agentId)) {
+            mapDomainEventToSpeech(event.type);
+          }
         }
       }
 
@@ -441,7 +466,9 @@ export function useAgentControlCenter(
               });
             }
 
-            mapStateTransitionToSpeech(prev, agent.state);
+            if (!agent.muted) {
+              mapStateTransitionToSpeech(prev, agent.state);
+            }
           }
           prevLegacyStatesRef.current[numId] = agent.state;
         }
@@ -491,10 +518,13 @@ export function useAgentControlCenter(
         agents: effectiveAgents.map((agent) => ({
           id: agent.id,
           contextUsage: agent.contextUsage,
+          inputTokens: agent.inputTokens,
+          outputTokens: agent.outputTokens,
+          muted: mutedAgentIds?.has(agent.id),
         })),
       });
     }
-  }, [legacyAgents, agentTools, agentStatuses, getOfficeState, legacyNormalized]);
+  }, [legacyAgents, agentTools, agentStatuses, getOfficeState, legacyNormalized, mutedAgentIds]);
 
   return state;
 }

@@ -62,3 +62,13 @@ export interface DomainPermissionDecisionMessage {
 export interface DomainSyncRequestMessage {
   type: 'requestSync';
 }
+
+export interface DomainSaveLayoutMessage {
+  type: 'saveLayout';
+  layout: unknown;
+}
+
+export interface DomainCloseAgentMessage {
+  type: 'closeAgent';
+  id: number;
+}

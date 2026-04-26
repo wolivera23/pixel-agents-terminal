@@ -110,6 +110,8 @@ function App() {
     }),
     [normalizedDebugState.agents, normalizedDebugState.recentEvents, normalizedDebugState.timeline],
   );
+  const [mutedAgentIds, setMutedAgentIds] = useState<Set<string>>(() => new Set());
+  const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds]);
 
   // Domain store — bridges legacy state into normalized Agent/Timeline/Alert model
   const domainState = useAgentControlCenter(
@@ -118,6 +120,7 @@ function App() {
     agentStatuses,
     getOfficeState,
     normalizedLegacyInput,
+    mutedAgentIdSet,
   );
   const realAgents = selectRealAgents(domainState);
   const pendingPermissions = selectPendingPermissions(domainState);
@@ -126,7 +129,12 @@ function App() {
   const fallbackDashboardAgents = normalizedDebugState.agents.filter(
     (agent) => agent.type === 'dev',
   );
-  const dashboardAgents = realAgents.length > 0 ? realAgents : fallbackDashboardAgents;
+  const dashboardAgents = (realAgents.length > 0 ? realAgents : fallbackDashboardAgents).map(
+    (agent) => ({
+      ...agent,
+      muted: mutedAgentIds.has(agent.id),
+    }),
+  );
   const dashboardTimeline =
     recentTimeline.length > 0 ? recentTimeline : normalizedDebugState.timeline.slice().reverse();
 
@@ -188,6 +196,40 @@ function App() {
 
   const handleCloseAgent = useCallback((id: number) => {
     vscode.postMessage({ type: 'closeAgent', id });
+  }, []);
+
+  const handleFocusDashboardAgent = useCallback((id: string) => {
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId)) return;
+    const os = getOfficeState();
+    if (os.characters.has(numericId)) {
+      os.selectedAgentId = numericId;
+      os.cameraFollowId = numericId;
+    }
+    setSelectedDomainAgent(id);
+    vscode.postMessage({ type: 'focusAgent', id: numericId });
+  }, []);
+
+  const handleToggleMuteDashboardAgent = useCallback((id: string) => {
+    setMutedAgentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleCloseDashboardAgent = useCallback((id: string) => {
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId)) return;
+    setMutedAgentIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setSelectedDomainAgent((prev) => (prev === id ? undefined : prev));
+    vscode.postMessage({ type: 'closeAgent', id: numericId });
   }, []);
 
   const handleClick = useCallback((agentId: number) => {
@@ -264,6 +306,9 @@ function App() {
               pendingPermissions={pendingPermissions}
               selectedAgentId={selectedDomainAgent}
               onSelectAgent={setSelectedDomainAgent}
+              onFocusAgent={handleFocusDashboardAgent}
+              onToggleMuteAgent={handleToggleMuteDashboardAgent}
+              onCloseAgent={handleCloseDashboardAgent}
             />
           </div>
         )}

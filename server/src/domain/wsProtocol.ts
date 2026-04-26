@@ -60,4 +60,18 @@ export interface DomainSyncRequestMessage {
   type: 'requestSync';
 }
 
-export type DomainWsClientMessage = DomainPermissionDecisionRequest | DomainSyncRequestMessage;
+export interface DomainSaveLayoutMessage {
+  type: 'saveLayout';
+  layout: unknown;
+}
+
+export interface DomainCloseAgentMessage {
+  type: 'closeAgent';
+  id: number;
+}
+
+export type DomainWsClientMessage =
+  | DomainPermissionDecisionRequest
+  | DomainSyncRequestMessage
+  | DomainSaveLayoutMessage
+  | DomainCloseAgentMessage;

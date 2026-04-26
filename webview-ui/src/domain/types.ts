@@ -76,6 +76,8 @@ export interface Agent {
   lastUpdate: number;
   currentTask?: string;
   contextUsage?: number;
+  inputTokens?: number;
+  outputTokens?: number;
   errorCount?: number;
   loopDetected?: boolean;
   muted?: boolean;

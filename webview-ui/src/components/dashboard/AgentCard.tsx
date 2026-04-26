@@ -1,3 +1,4 @@
+import { MAX_CONTEXT_TOKENS } from '../../constants.js';
 import type { Agent } from '../../domain/types.js';
 import { AgentRuntimeState, AgentSource } from '../../domain/types.js';
 
@@ -5,6 +6,9 @@ interface AgentCardProps {
   agent: Agent;
   isSelected?: boolean;
   onClick?: () => void;
+  onFocus?: () => void;
+  onToggleMute?: () => void;
+  onClose?: () => void;
 }
 
 const STATE_COLORS: Record<AgentRuntimeState, string> = {
@@ -46,15 +50,33 @@ function contextColor(usage: number): string {
   return 'var(--color-text-muted)';
 }
 
-export function AgentCard({ agent, isSelected = false, onClick }: AgentCardProps) {
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
+  return String(value);
+}
+
+export function AgentCard({
+  agent,
+  isSelected = false,
+  onClick,
+  onFocus,
+  onToggleMute,
+  onClose,
+}: AgentCardProps) {
   const stateColor = STATE_COLORS[agent.state];
   const isPending = agent.state === AgentRuntimeState.WAITING_PERMISSION;
   const isError =
     agent.state === AgentRuntimeState.ERROR || agent.state === AgentRuntimeState.BLOCKED;
   const sourceLabel = agent.source ? SOURCE_LABELS[agent.source] : 'CLI';
-  const hasContext = agent.contextUsage !== undefined && agent.contextUsage > 0;
-  const ctxPct = hasContext ? Math.min(Math.round(agent.contextUsage! * 100), 100) : 0;
-  const ctxColor = hasContext ? contextColor(agent.contextUsage!) : '';
+  const inputTokens = agent.inputTokens ?? 0;
+  const outputTokens = agent.outputTokens ?? 0;
+  const totalTokens = inputTokens + outputTokens;
+  const derivedContextUsage = totalTokens > 0 ? totalTokens / MAX_CONTEXT_TOKENS : undefined;
+  const contextUsage = agent.contextUsage ?? derivedContextUsage;
+  const hasContext = contextUsage !== undefined && contextUsage > 0;
+  const ctxPct = hasContext ? Math.min(Math.round(contextUsage! * 100), 100) : 0;
+  const ctxColor = hasContext ? contextColor(contextUsage!) : '';
 
   return (
     <div
@@ -124,7 +146,7 @@ export function AgentCard({ agent, isSelected = false, onClick }: AgentCardProps
           <div className="flex justify-between mb-2">
             <span className="text-2xs text-text-muted">contexto</span>
             <span className="text-2xs" style={{ color: ctxColor }}>
-              {ctxPct}%
+              {ctxPct}% · {formatTokens(totalTokens)}
             </span>
           </div>
           <div
@@ -147,6 +169,84 @@ export function AgentCard({ agent, isSelected = false, onClick }: AgentCardProps
               }}
             />
           </div>
+        </div>
+      )}
+
+      {isSelected && (
+        <div
+          className="mb-6 px-6 py-5 text-2xs"
+          style={{
+            background: 'var(--color-bg-dark)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          <div className="flex justify-between gap-6 mb-3">
+            <span>estado</span>
+            <span style={{ color: stateColor }}>{STATE_LABELS[agent.state]}</span>
+          </div>
+          <div className="flex justify-between gap-6 mb-3">
+            <span>provider</span>
+            <span>{sourceLabel}</span>
+          </div>
+          <div className="flex justify-between gap-6 mb-3">
+            <span>tokens in/out</span>
+            <span>
+              {formatTokens(inputTokens)} / {formatTokens(outputTokens)}
+            </span>
+          </div>
+          <div className="flex justify-between gap-6 mb-3">
+            <span>id</span>
+            <span>{agent.id}</span>
+          </div>
+          {agent.lastAction && (
+            <div className="mt-4" title={agent.lastAction}>
+              <div className="mb-2">última acción</div>
+              <div className="truncate" style={{ color: 'var(--color-text)' }}>
+                {agent.lastAction}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isSelected && (
+        <div className="flex gap-4 mb-6">
+          <button
+            type="button"
+            className="text-2xs px-5 py-3 border border-border bg-btn-bg text-text cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onFocus?.();
+            }}
+          >
+            Focus
+          </button>
+          <button
+            type="button"
+            className="text-2xs px-5 py-3 border border-border bg-btn-bg text-text cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleMute?.();
+            }}
+          >
+            {agent.muted ? 'Unmute' : 'Mute'}
+          </button>
+          <button
+            type="button"
+            className="text-2xs px-5 py-3 border cursor-pointer"
+            style={{
+              background: 'var(--color-bg-dark)',
+              borderColor: 'var(--color-status-error)',
+              color: 'var(--color-status-error)',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose?.();
+            }}
+          >
+            Close
+          </button>
         </div>
       )}
 

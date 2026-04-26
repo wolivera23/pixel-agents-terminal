@@ -25,6 +25,7 @@ import type {
   CatalogEntry,
   CharacterDirectionSprites,
 } from '../../shared/assets/types.ts';
+import { getBrowserSavedLayout } from './vscodeApi.js';
 
 interface MockPayload {
   characters: CharacterDirectionSprites[];
@@ -255,7 +256,8 @@ export function dispatchMockMessages(): void {
   dispatch({ type: 'floorTilesLoaded', sprites: floorSprites });
   dispatch({ type: 'wallTilesLoaded', sets: wallSets });
   dispatch({ type: 'furnitureAssetsLoaded', catalog: furnitureCatalog, sprites: furnitureSprites });
-  dispatch({ type: 'layoutLoaded', layout });
+  // Use layout saved in localStorage (if any), otherwise fall back to the bundled default
+  dispatch({ type: 'layoutLoaded', layout: getBrowserSavedLayout() ?? layout });
   dispatch({
     type: 'settingsLoaded',
     soundEnabled: false,

@@ -11,6 +11,8 @@ import {
   FUEL_GAUGE_HEIGHT_PX,
   FUEL_GAUGE_WIDTH_PX,
   MAX_CONTEXT_TOKENS,
+  NAME_TAG_BG_COLOR,
+  NAME_TAG_TEXT_COLOR,
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOKEN_CRITICAL_THRESHOLD,
@@ -116,8 +118,8 @@ export function ToolOverlay({
         const isHovered = hoveredId === id;
         const isSub = ch.isSubagent;
 
-        // Only show for hovered or selected agents (unless always-show is on)
-        if (!alwaysShowOverlay && !isSelected && !isHovered) return null;
+        // Sub-agents only show when hovered/selected (they are transient workers)
+        if (isSub && !isSelected && !isHovered) return null;
 
         // Position above character
         const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
@@ -153,11 +155,13 @@ export function ToolOverlay({
         }
 
         // Team info
-        const isTeamAgent = !!ch.teamName;
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const totalTokens = ch.inputTokens + ch.outputTokens;
         const tokenRatio = totalTokens / MAX_CONTEXT_TOKENS;
         const hasExtraLines = !!(ch.folderName || teamRoleLabel);
+
+        const showFull = isSelected || isHovered || (alwaysShowOverlay && !isSub);
+        const nameLabel = ch.folderName ?? ch.agentName ?? (isSub ? null : `Agent ${id}`);
 
         return (
           <div
@@ -165,63 +169,98 @@ export function ToolOverlay({
             className="absolute flex flex-col items-center -translate-x-1/2"
             style={{
               left: screenX,
-              top: screenY - (hasExtraLines ? 34 : 28),
+              top: screenY - (showFull && hasExtraLines ? 34 : showFull ? 28 : 22),
               pointerEvents: isSelected ? 'auto' : 'none',
-              opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
               zIndex: isSelected ? 42 : 41,
             }}
           >
-            <div className="flex items-center border-border px-8 pt-2 pb-4 gap-5 pixel-panel whitespace-nowrap max-w-2xs">
-              {dotColor && (
-                <span
-                  className={`w-6 h-6 rounded-full shrink-0 ${isActive && !hasPermission ? 'pixel-pulse' : ''}`}
-                  style={{ background: dotColor }}
-                />
-              )}
-              <div className="flex flex-col gap-0 overflow-hidden">
-                {teamRoleLabel && (
+            {showFull ? (
+              /* ── Full panel (hover / selected / alwaysShow) ── */
+              <div className="flex items-center border-border px-8 pt-2 pb-4 gap-5 pixel-panel whitespace-nowrap max-w-2xs">
+                {dotColor && (
+                  <span
+                    className={`w-6 h-6 rounded-full shrink-0 ${isActive && !hasPermission ? 'pixel-pulse' : ''}`}
+                    style={{ background: dotColor }}
+                  />
+                )}
+                <div className="flex flex-col gap-0 overflow-hidden">
+                  {teamRoleLabel && (
+                    <span
+                      className="overflow-hidden text-ellipsis block leading-none"
+                      style={{
+                        fontSize: '18px',
+                        color: ch.isTeamLead ? TEAM_LEAD_COLOR : TEAM_ROLE_COLOR,
+                        fontWeight: ch.isTeamLead ? 'bold' : undefined,
+                      }}
+                    >
+                      {teamRoleLabel}
+                    </span>
+                  )}
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"
                     style={{
-                      fontSize: '18px',
-                      color: ch.isTeamLead ? TEAM_LEAD_COLOR : TEAM_ROLE_COLOR,
-                      fontWeight: ch.isTeamLead ? 'bold' : undefined,
+                      fontSize: isSub ? '20px' : '22px',
+                      fontStyle: isSub ? 'italic' : undefined,
                     }}
                   >
-                    {teamRoleLabel}
+                    {activityText}
                   </span>
-                )}
-                <span
-                  className="overflow-hidden text-ellipsis block leading-none"
-                  style={{
-                    fontSize: isSub ? '20px' : '22px',
-                    fontStyle: isSub ? 'italic' : undefined,
-                  }}
-                >
-                  {activityText}
-                </span>
-                {ch.folderName && (
-                  <span className="text-2xs leading-none overflow-hidden text-ellipsis block">
-                    {ch.folderName}
-                  </span>
+                  {ch.folderName && (
+                    <span className="text-2xs leading-none overflow-hidden text-ellipsis block">
+                      {ch.folderName}
+                    </span>
+                  )}
+                </div>
+                {isSelected && !isSub && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseAgent(id);
+                    }}
+                    title="Close agent"
+                    className="ml-2 shrink-0 leading-none"
+                  >
+                    ×
+                  </Button>
                 )}
               </div>
-              {isSelected && !isSub && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseAgent(id);
-                  }}
-                  title="Close agent"
-                  className="ml-2 shrink-0 leading-none"
-                >
-                  ×
-                </Button>
-              )}
-            </div>
-            {isTeamAgent && totalTokens > 0 && (
+            ) : nameLabel ? (
+              /* ── Compact name tag (always visible when not hovered) ── */
+              <div
+                className="whitespace-nowrap"
+                style={{
+                  fontSize: '18px',
+                  color: NAME_TAG_TEXT_COLOR,
+                  background: NAME_TAG_BG_COLOR,
+                  padding: '1px 5px',
+                  maxWidth: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  letterSpacing: 0,
+                  lineHeight: 1.2,
+                }}
+              >
+                {dotColor && (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 5,
+                      height: 5,
+                      borderRadius: '50%',
+                      background: dotColor,
+                      marginRight: 4,
+                      verticalAlign: 'middle',
+                      marginBottom: 2,
+                    }}
+                    className={isActive && !hasPermission ? 'pixel-pulse' : ''}
+                  />
+                )}
+                {nameLabel}
+              </div>
+            ) : null}
+            {!isSub && totalTokens > 0 && (
               <div
                 style={{
                   width: FUEL_GAUGE_WIDTH_PX,
