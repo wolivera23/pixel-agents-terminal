@@ -117,12 +117,12 @@ export const TOOL_START_NOTE_DURATION_SEC = 0.055;
 export const TOOL_START_VOLUME = 0.06;
 
 // ── Typing Loop (mechanical keyboard click) ─────────────────
-export const TYPING_CLICK_INTERVAL_MS = 185; // ms between keystrokes
+export const TYPING_CLICK_INTERVAL_MS = 260; // ms between keystrokes
 export const TYPING_CLICK_NOISE_DUR_SEC = 0.012; // tick transient (noise)
 export const TYPING_CLICK_BODY_DUR_SEC = 0.055; // thock body (tone)
 export const TYPING_CLICK_BODY_HZ = 620; // resonance frequency
-export const TYPING_CLICK_NOISE_VOLUME = 0.09;
-export const TYPING_CLICK_BODY_VOLUME = 0.05;
+export const TYPING_CLICK_NOISE_VOLUME = 0.028; // subtle
+export const TYPING_CLICK_BODY_VOLUME = 0.016; // subtle
 
 // ── Agent Spawn Sound (ascending C5→E5→G5 arpeggio) ────────
 export const SPAWN_NOTE_1_HZ = 523.25; // C5
