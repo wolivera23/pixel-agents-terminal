@@ -4,6 +4,7 @@ import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
+import { DemoControls } from './components/DemoControls.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
@@ -382,6 +383,8 @@ function App() {
       {showMigrationNotice && (
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
       )}
+
+      {isBrowserRuntime && <DemoControls />}
     </div>
   );
 }
