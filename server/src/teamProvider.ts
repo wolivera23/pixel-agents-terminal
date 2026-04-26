@@ -3,7 +3,7 @@
  * Lead + Teammates pattern (Claude Agent Teams today; hypothetical future CLIs).
  *
  * This interface only covers concepts that `HookProvider.normalizeHookEvent` +
- * `AgentEvent` don't already cover. Generic concepts (subagent start/end, tool
+ * `ProviderEvent` don't already cover. Generic concepts (subagent start/end, tool
  * start/end, permission request, session lifecycle) belong on HookProvider.
  *
  * Providers without team support simply don't set `HookProvider.team`. No team-

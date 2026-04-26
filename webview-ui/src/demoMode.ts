@@ -6,6 +6,7 @@
  *   Secretaries occasionally type, managers inspect, cleaners roam and pause.
  */
 
+import { type NpcRole, triggerNpcSpeech } from './agentSpeech.js';
 import { startTypingLoop, stopTypingLoop } from './notificationSound.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,18 +119,17 @@ export function getDemoAgentIds(): number[] {
 
 // ── Office NPCs ───────────────────────────────────────────────────────────────
 
-export type NpcRole = 'cleaner' | 'secretary' | 'manager';
-
 const NPC_ROLES: Array<{ role: NpcRole; label: string }> = [
   { role: 'secretary', label: 'Secretaría' },
   { role: 'cleaner', label: 'Limpieza' },
   { role: 'manager', label: 'Gerencia' },
 ];
 
-// Secretary: sits and sends short typing bursts (visual animation only, no sound)
+// Secretary: sits and sends short typing bursts
 function runSecretaryLoop(id: number): void {
   if (!npcTimers.has(id)) return;
   const toolId = `npc-${id}-${Date.now()}`;
+  triggerNpcSpeech('secretary');
   dispatch({ type: 'agentToolStart', id, toolId, status: 'typing', toolName: 'typing' });
   scheduleFor(npcTimers, id, rand(3000, 8000), () => {
     if (!npcTimers.has(id)) return;
@@ -144,6 +144,7 @@ function runManagerLoop(id: number): void {
   if (!npcTimers.has(id)) return;
   if (Math.random() < 0.4) {
     const toolId = `npc-${id}-${Date.now()}`;
+    triggerNpcSpeech('manager');
     dispatch({ type: 'agentToolStart', id, toolId, status: 'reviewing', toolName: 'reviewing' });
     scheduleFor(npcTimers, id, rand(2000, 5000), () => {
       if (!npcTimers.has(id)) return;
@@ -152,6 +153,7 @@ function runManagerLoop(id: number): void {
       scheduleFor(npcTimers, id, rand(10000, 25000), () => runManagerLoop(id));
     });
   } else {
+    triggerNpcSpeech('manager');
     scheduleFor(npcTimers, id, rand(12000, 30000), () => runManagerLoop(id));
   }
 }
@@ -161,6 +163,7 @@ function runCleanerLoop(id: number): void {
   if (!npcTimers.has(id)) return;
   if (Math.random() < 0.5) {
     const toolId = `npc-${id}-${Date.now()}`;
+    triggerNpcSpeech('cleaner');
     dispatch({ type: 'agentToolStart', id, toolId, status: 'cleaning', toolName: 'cleaning' });
     scheduleFor(npcTimers, id, rand(4000, 9000), () => {
       if (!npcTimers.has(id)) return;
@@ -169,6 +172,7 @@ function runCleanerLoop(id: number): void {
       scheduleFor(npcTimers, id, rand(6000, 15000), () => runCleanerLoop(id));
     });
   } else {
+    triggerNpcSpeech('cleaner');
     scheduleFor(npcTimers, id, rand(8000, 18000), () => runCleanerLoop(id));
   }
 }

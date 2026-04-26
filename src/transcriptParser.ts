@@ -21,20 +21,49 @@ import type { AgentState } from './types.js';
 
 const PERMISSION_EXEMPT_TOOLS = new Set(['Task', 'Agent', 'AskUserQuestion']);
 
-/** Hook provider: supplies formatToolStatus + team.extractTeamMetadataFromRecord.
- *  Registered once at startup via setHookProvider(). Functions below assume it's set. */
-let hookProvider: HookProvider | null = null;
+/** Hook providers supply CLI-specific formatting + optional team metadata extraction. */
+let defaultHookProvider: HookProvider | null = null;
+const hookProviders = new Map<string, HookProvider>();
 
 /** Register the HookProvider that owns CLI-specific formatting and team metadata extraction. */
 export function setHookProvider(provider: HookProvider): void {
-  hookProvider = provider;
+  defaultHookProvider = provider;
+  hookProviders.set(provider.id, provider);
+}
+
+export function setHookProviders(providers: HookProvider[]): void {
+  hookProviders.clear();
+  for (const provider of providers) {
+    hookProviders.set(provider.id, provider);
+  }
+  defaultHookProvider = providers[0] ?? null;
+}
+
+function getHookProviderForAgent(agent: AgentState): HookProvider | null {
+  return hookProviders.get(agent.providerId ?? 'claude') ?? defaultHookProvider;
 }
 
 /** Format a tool status line. Delegates to the active HookProvider's formatToolStatus. */
-export function formatToolStatus(toolName: string, input: Record<string, unknown>): string {
-  if (hookProvider) return hookProvider.formatToolStatus(toolName, input);
+export function formatToolStatus(
+  toolName: string,
+  input: Record<string, unknown>,
+  providerId?: string,
+): string {
+  const provider = providerId ? hookProviders.get(providerId) : defaultHookProvider;
+  if (provider) return provider.formatToolStatus(toolName, input);
   // Fallback for bootstrapping / tests without a provider set.
   return defaultFormatToolStatus(toolName, input);
+}
+
+function formatToolStatusForAgent(
+  agent: AgentState,
+  toolName: string,
+  input: Record<string, unknown>,
+): string {
+  return (
+    getHookProviderForAgent(agent)?.formatToolStatus(toolName, input) ??
+    defaultFormatToolStatus(toolName, input)
+  );
 }
 
 /** Fallback formatter for edge cases (tests, provider not yet registered).
@@ -100,11 +129,26 @@ export function processTranscriptLine(
   agent.linesProcessed++;
   try {
     const record = JSON.parse(line);
+    const provider = getHookProviderForAgent(agent);
+    const permissionExemptTools = provider?.permissionExemptTools ?? PERMISSION_EXEMPT_TOOLS;
+
+    if ((agent.providerId ?? 'claude') === 'codex') {
+      processCodexRecord(
+        agentId,
+        record,
+        agents,
+        waitingTimers,
+        permissionTimers,
+        webview,
+        permissionExemptTools,
+      );
+      return;
+    }
 
     // -- Agent Teams: extract team metadata via the active provider --
     // The provider reads its CLI's own field names (Claude: record.teamName + record.agentName).
     // Other CLIs would implement this differently or not at all.
-    const teamMeta = hookProvider?.team?.extractTeamMetadataFromRecord(record);
+    const teamMeta = provider?.team?.extractTeamMetadataFromRecord(record);
     if (teamMeta?.teamName && teamMeta.teamName !== agent.teamName) {
       agent.teamName = teamMeta.teamName;
       agent.agentName = teamMeta.agentName;
@@ -169,14 +213,14 @@ export function processTranscriptLine(
         for (const block of blocks) {
           if (block.type === 'tool_use' && block.id) {
             const toolName = block.name || '';
-            const status = formatToolStatus(toolName, block.input || {});
+            const status = formatToolStatusForAgent(agent, toolName, block.input || {});
             console.log(
               `[Pixel Agents] JSONL: Agent ${agentId} - tool start: ${block.id} ${status}`,
             );
             agent.activeToolIds.add(block.id);
             agent.activeToolStatuses.set(block.id, status);
             agent.activeToolNames.set(block.id, toolName);
-            if (!PERMISSION_EXEMPT_TOOLS.has(toolName)) {
+            if (!permissionExemptTools.has(toolName)) {
               hasNonExemptTool = true;
             }
             // Detect tmux vs inline team mode from Agent tool's run_in_background flag
@@ -221,7 +265,7 @@ export function processTranscriptLine(
         // produces false positives. Permission on teammates comes from the lead's
         // routed Notification(permission_prompt) hook — slower but accurate.
         if (hasNonExemptTool && !agent.hookDelivered && !agent.leadAgentId) {
-          startPermissionTimer(agentId, agents, permissionTimers, PERMISSION_EXEMPT_TOOLS, webview);
+          startPermissionTimer(agentId, agents, permissionTimers, permissionExemptTools, webview);
         }
       } else if (blocks.some((b) => b.type === 'text') && !agent.hadToolsInTurn) {
         // Text-only response in a turn that hasn't used any tools.
@@ -244,7 +288,15 @@ export function processTranscriptLine(
         `[Pixel Agents] Agent ${agentId}: assistant record has no content. Keys: ${Object.keys(record).join(', ')}`,
       );
     } else if (record.type === 'progress') {
-      processProgressRecord(agentId, record, agents, waitingTimers, permissionTimers, webview);
+      processProgressRecord(
+        agentId,
+        record,
+        agents,
+        waitingTimers,
+        permissionTimers,
+        webview,
+        permissionExemptTools,
+      );
     } else if (record.type === 'user') {
       const content = record.message?.content ?? record.content;
       if (Array.isArray(content)) {
@@ -430,6 +482,164 @@ export function processTranscriptLine(
   }
 }
 
+function processCodexRecord(
+  agentId: number,
+  record: Record<string, unknown>,
+  agents: Map<number, AgentState>,
+  waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
+  permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
+  webview: vscode.Webview | undefined,
+  permissionExemptTools: ReadonlySet<string>,
+): void {
+  const agent = agents.get(agentId);
+  if (!agent) return;
+
+  if (record.type === 'session_meta') {
+    const payload = asRecord(record.payload);
+    if (typeof payload.id === 'string') {
+      agent.sessionId = payload.id;
+    }
+    return;
+  }
+
+  if (record.type === 'event_msg') {
+    const payload = asRecord(record.payload);
+    const payloadType = payload.type;
+    if (payloadType === 'user_message') {
+      cancelWaitingTimer(agentId, waitingTimers);
+      clearAgentActivity(agent, agentId, permissionTimers, webview);
+      agent.hadToolsInTurn = false;
+      agent.isWaiting = false;
+      webview?.postMessage({ type: 'agentStatus', id: agentId, status: 'active' });
+      return;
+    }
+    if (payloadType === 'task_started') {
+      cancelWaitingTimer(agentId, waitingTimers);
+      agent.isWaiting = false;
+      webview?.postMessage({ type: 'agentStatus', id: agentId, status: 'active' });
+      return;
+    }
+    if (payloadType === 'agent_message') {
+      if (!agent.hadToolsInTurn && !agent.hookDelivered) {
+        startWaitingTimer(agentId, TEXT_IDLE_DELAY_MS, agents, waitingTimers, webview);
+      }
+      return;
+    }
+    if (payloadType === 'exec_command_end' && typeof payload.call_id === 'string') {
+      completeCodexTool(
+        agentId,
+        payload.call_id,
+        agent,
+        agents,
+        waitingTimers,
+        permissionTimers,
+        webview,
+      );
+      return;
+    }
+  }
+
+  if (record.type !== 'response_item') {
+    return;
+  }
+
+  const payload = asRecord(record.payload);
+  const itemType = payload.type;
+
+  if (itemType === 'function_call' && typeof payload.call_id === 'string') {
+    const toolName = typeof payload.name === 'string' ? payload.name : 'Unknown';
+    const input = asRecord(payload.arguments);
+    const status = formatToolStatusForAgent(agent, toolName, input);
+
+    cancelWaitingTimer(agentId, waitingTimers);
+    agent.isWaiting = false;
+    agent.hadToolsInTurn = true;
+    agent.activeToolIds.add(payload.call_id);
+    agent.activeToolStatuses.set(payload.call_id, status);
+    agent.activeToolNames.set(payload.call_id, toolName);
+
+    if (!agent.hookDelivered) {
+      webview?.postMessage({
+        type: 'agentToolStart',
+        id: agentId,
+        toolId: payload.call_id,
+        status,
+        toolName,
+        permissionActive: agent.permissionSent,
+      });
+    }
+    webview?.postMessage({ type: 'agentStatus', id: agentId, status: 'active' });
+
+    if (!permissionExemptTools.has(toolName) && !agent.hookDelivered) {
+      startPermissionTimer(agentId, agents, permissionTimers, permissionExemptTools, webview);
+    }
+    return;
+  }
+
+  if (itemType === 'function_call_output' && typeof payload.call_id === 'string') {
+    completeCodexTool(
+      agentId,
+      payload.call_id,
+      agent,
+      agents,
+      waitingTimers,
+      permissionTimers,
+      webview,
+    );
+    return;
+  }
+
+  if (itemType === 'message' && !agent.hadToolsInTurn && !agent.hookDelivered) {
+    startWaitingTimer(agentId, TEXT_IDLE_DELAY_MS, agents, waitingTimers, webview);
+  }
+}
+
+function completeCodexTool(
+  agentId: number,
+  toolId: string,
+  agent: AgentState,
+  agents: Map<number, AgentState>,
+  waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
+  permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
+  webview: vscode.Webview | undefined,
+): void {
+  if (!agent.activeToolIds.has(toolId)) return;
+  agent.activeToolIds.delete(toolId);
+  agent.activeToolStatuses.delete(toolId);
+  agent.activeToolNames.delete(toolId);
+  cancelPermissionTimer(agentId, permissionTimers);
+
+  if (!agent.hookDelivered) {
+    setTimeout(() => {
+      webview?.postMessage({
+        type: 'agentToolDone',
+        id: agentId,
+        toolId,
+      });
+    }, TOOL_DONE_DELAY_MS);
+  }
+
+  if (agent.activeToolIds.size === 0) {
+    agent.hadToolsInTurn = false;
+    if (!agent.hookDelivered) {
+      startWaitingTimer(agentId, TEXT_IDLE_DELAY_MS, agents, waitingTimers, webview);
+    }
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'object' && value !== null) return value as Record<string, unknown>;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+  }
+  return {};
+}
+
 function processProgressRecord(
   agentId: number,
   record: Record<string, unknown>,
@@ -437,6 +647,7 @@ function processProgressRecord(
   _waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
   permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
   webview: vscode.Webview | undefined,
+  permissionExemptTools: ReadonlySet<string> = PERMISSION_EXEMPT_TOOLS,
 ): void {
   const agent = agents.get(agentId);
   if (!agent) return;
@@ -453,7 +664,7 @@ function processProgressRecord(
   const dataType = data.type as string | undefined;
   if (dataType === 'bash_progress' || dataType === 'mcp_progress') {
     if (agent.activeToolIds.has(parentToolId) && !agent.hookDelivered && !agent.leadAgentId) {
-      startPermissionTimer(agentId, agents, permissionTimers, PERMISSION_EXEMPT_TOOLS, webview);
+      startPermissionTimer(agentId, agents, permissionTimers, permissionExemptTools, webview);
     }
     return;
   }
@@ -475,7 +686,7 @@ function processProgressRecord(
     for (const block of content) {
       if (block.type === 'tool_use' && block.id) {
         const toolName = block.name || '';
-        const status = formatToolStatus(toolName, block.input || {});
+        const status = formatToolStatusForAgent(agent, toolName, block.input || {});
         console.log(
           `[Pixel Agents] Agent ${agentId} subagent tool start: ${block.id} ${status} (parent: ${parentToolId})`,
         );
@@ -496,7 +707,7 @@ function processProgressRecord(
         }
         subNames.set(block.id, toolName);
 
-        if (!PERMISSION_EXEMPT_TOOLS.has(toolName)) {
+        if (!permissionExemptTools.has(toolName)) {
           hasNonExemptSubTool = true;
         }
 
@@ -510,7 +721,7 @@ function processProgressRecord(
       }
     }
     if (hasNonExemptSubTool && !agent.hookDelivered) {
-      startPermissionTimer(agentId, agents, permissionTimers, PERMISSION_EXEMPT_TOOLS, webview);
+      startPermissionTimer(agentId, agents, permissionTimers, permissionExemptTools, webview);
     }
   } else if (msgType === 'user') {
     for (const block of content) {
@@ -545,7 +756,7 @@ function processProgressRecord(
     let stillHasNonExempt = false;
     for (const [, subNames] of agent.activeSubagentToolNames) {
       for (const [, toolName] of subNames) {
-        if (!PERMISSION_EXEMPT_TOOLS.has(toolName)) {
+        if (!permissionExemptTools.has(toolName)) {
           stillHasNonExempt = true;
           break;
         }
@@ -553,7 +764,7 @@ function processProgressRecord(
       if (stillHasNonExempt) break;
     }
     if (stillHasNonExempt && !agent.hookDelivered) {
-      startPermissionTimer(agentId, agents, permissionTimers, PERMISSION_EXEMPT_TOOLS, webview);
+      startPermissionTimer(agentId, agents, permissionTimers, permissionExemptTools, webview);
     }
   }
 }

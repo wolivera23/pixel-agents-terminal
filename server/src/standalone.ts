@@ -17,7 +17,9 @@ import * as http from 'http';
 import * as path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { copyHookScript, installHooks } from './providers/hook/claude/claudeHookInstaller.js';
+import { DomainSessionBridge } from './domain/domainSessionBridge.js';
+import type { DomainWsClientMessage } from './domain/wsProtocol.js';
+import { copyAllHookScripts, hookProvidersById, installAllHooks } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
 // __dirname is available in CJS (the target this project compiles to)
@@ -25,6 +27,7 @@ import { PixelAgentsServer } from './server.js';
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
 const WS_PORT = parseInt(process.env.PIXEL_AGENTS_WS_PORT ?? '3000', 10);
+const domainBridge = new DomainSessionBridge(hookProvidersById);
 
 // ── WebSocket clients ─────────────────────────────────────────────────────────
 
@@ -41,24 +44,11 @@ function broadcast(msg: object): void {
 
 // ── Agent state ───────────────────────────────────────────────────────────────
 
-const sessionToAgentId = new Map<string, number>();
 const agentCurrentToolId = new Map<number, string>();
-let nextAgentId = 1;
-
-function getOrCreateAgent(sessionId: string, cwd?: string): { id: number; isNew: boolean } {
-  if (sessionToAgentId.has(sessionId)) {
-    return { id: sessionToAgentId.get(sessionId)!, isNew: false };
-  }
-  const id = nextAgentId++;
-  sessionToAgentId.set(sessionId, id);
-  const folderName = cwd ? path.basename(cwd) : undefined;
-  broadcast({ type: 'agentCreated', id, folderName });
-  return { id, isNew: true };
-}
 
 // ── Hook event → webview message mapping ─────────────────────────────────────
 
-function handleHookEvent(_providerId: string, event: Record<string, unknown>): void {
+function handleHookEvent(providerId: string, event: Record<string, unknown>): void {
   const sessionId = event.session_id as string | undefined;
   const hookName = event.hook_event_name as string | undefined;
   console.log(
@@ -66,7 +56,20 @@ function handleHookEvent(_providerId: string, event: Record<string, unknown>): v
   );
   if (!sessionId || !hookName) return;
 
-  const { id } = getOrCreateAgent(sessionId, event.cwd as string | undefined);
+  const domainResult = domainBridge.handleHookEvent(providerId, event);
+  if (!domainResult) return;
+  const {
+    agentId: id,
+    isNewAgent,
+    providerId: resolvedProviderId,
+    folderName,
+    domainMessages,
+  } = domainResult;
+
+  if (isNewAgent) {
+    broadcast({ type: 'agentCreated', id, folderName, providerId: resolvedProviderId });
+  }
+  for (const msg of domainMessages) broadcast(msg);
 
   switch (hookName) {
     case 'SessionStart': {
@@ -77,7 +80,6 @@ function handleHookEvent(_providerId: string, event: Record<string, unknown>): v
     case 'SessionEnd': {
       broadcast({ type: 'agentToolsClear', id });
       broadcast({ type: 'agentClosed', id });
-      sessionToAgentId.delete(sessionId);
       agentCurrentToolId.delete(id);
       break;
     }
@@ -136,11 +138,11 @@ function handleHookEvent(_providerId: string, event: Record<string, unknown>): v
 async function main(): Promise<void> {
   // Install hook script + Claude Code settings entries
   try {
-    copyHookScript(PROJECT_ROOT);
-    installHooks();
+    copyAllHookScripts(PROJECT_ROOT);
+    installAllHooks();
   } catch (e) {
     console.warn('[Pixel Agents] Could not auto-install hooks:', e);
-    console.warn('[Pixel Agents] Run `npm run build` first so dist/hooks/claude-hook.js exists.');
+    console.warn('[Pixel Agents] Run `npm run build` first so dist/hooks/*.js exists.');
   }
 
   // Start hook receiver (manages ~/.pixel-agents/server.json for hook scripts)
@@ -162,9 +164,28 @@ async function main(): Promise<void> {
     console.log(`[Pixel Agents] Browser connected (${clients.size} active)`);
 
     // Replay existing agents so a reconnecting browser doesn't miss agentCreated
-    for (const [, agentId] of sessionToAgentId) {
-      ws.send(JSON.stringify({ type: 'agentCreated', id: agentId }));
+    for (const agent of domainBridge.buildLegacyReplayAgents()) {
+      ws.send(
+        JSON.stringify({
+          type: 'agentCreated',
+          id: agent.agentId,
+          folderName: agent.folderName,
+          providerId: agent.providerId,
+        }),
+      );
     }
+    ws.send(JSON.stringify(domainBridge.buildSnapshot()));
+
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString()) as DomainWsClientMessage;
+        for (const domainMsg of domainBridge.handleClientMessage(msg)) {
+          broadcast(domainMsg);
+        }
+      } catch {
+        // Ignore malformed or unsupported client messages.
+      }
+    });
 
     ws.on('close', () => {
       clients.delete(ws);
@@ -183,7 +204,7 @@ async function main(): Promise<void> {
   console.log(`  WebSocket    →  ws://127.0.0.1:${WS_PORT}/ws`);
   console.log('  UI           →  http://localhost:5173  (run: npm run dev in webview-ui/)');
   console.log('  ──────────────────────────────────────────────');
-  console.log('  Claude Code hooks installed ✓');
+  console.log('  Claude Code and Codex hooks installed');
   console.log('');
 }
 

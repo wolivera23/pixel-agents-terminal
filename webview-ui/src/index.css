@@ -37,6 +37,12 @@
   --color-status-success: #89d185;
   --color-status-error: var(--color-danger);
 
+  /* Semi-transparent status backgrounds for dashboard panels */
+  --color-status-success-bg: rgba(135, 209, 133, 0.12);
+  --color-status-error-bg: rgba(209, 66, 73, 0.12);
+  --color-status-permission-bg: rgba(204, 167, 0, 0.12);
+  --color-border-faint: rgba(74, 74, 106, 0.4);
+
   /* Shadow */
   --shadow-pixel: 2px 2px 0px #0a0a14;
 

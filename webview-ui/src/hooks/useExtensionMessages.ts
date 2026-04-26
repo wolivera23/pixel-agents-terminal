@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+// Dev speech and context_warning are now driven by useAgentControlCenter via speechMapper.
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
@@ -505,7 +506,10 @@ export function useExtensionMessages(
         );
       } else if (msg.type === 'agentTokenUsage') {
         const id = msg.id as number;
-        os.setAgentTokens(id, msg.inputTokens as number, msg.outputTokens as number);
+        const inputTokens = msg.inputTokens as number;
+        const outputTokens = msg.outputTokens as number;
+        os.setAgentTokens(id, inputTokens, outputTokens);
+        // context_warning detection moved to useAgentControlCenter (domain layer)
       }
     };
     window.addEventListener('message', handler);

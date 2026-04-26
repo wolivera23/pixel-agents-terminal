@@ -155,6 +155,28 @@ export const CHARACTER_HIT_HALF_WIDTH = 8;
 export const CHARACTER_HIT_HEIGHT = 24;
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32;
 
+// ── Dev Agent Speech ──────────────────────────────────────────
+export const SPEECH_THROTTLE_MS = 5000;
+export const VOICE_MAX_PHRASE_CHARS = 120;
+export const VOICE_RATE_MIN = 0.5;
+export const VOICE_RATE_MAX = 1.5;
+export const VOICE_RATE_STEP = 0.05;
+export const VOICE_PITCH_MIN = 0.5;
+export const VOICE_PITCH_MAX = 1.5;
+export const VOICE_PITCH_STEP = 0.05;
+export const VOICE_VOLUME_MIN = 0.0;
+export const VOICE_VOLUME_MAX = 1.0;
+export const VOICE_VOLUME_STEP = 0.05;
+
+// ── NPC Ambient Speech ────────────────────────────────────────
+export const NPC_SPEAK_CHANCE = 0.38;
+export const NPC_THROTTLE_LOW_MIN_MS = 60_000;
+export const NPC_THROTTLE_MEDIUM_MIN_MS = 30_000;
+export const NPC_THROTTLE_HIGH_MIN_MS = 10_000;
+export const NPC_VOLUME_MULTIPLIER_MIN = 0.1;
+export const NPC_VOLUME_MULTIPLIER_MAX = 2.0;
+export const NPC_VOLUME_MULTIPLIER_STEP = 0.05;
+
 // ── Agent Teams ─────────────────────────────────────────────
 export const MAX_CONTEXT_TOKENS = 200_000;
 export const TOKEN_WARN_THRESHOLD = 0.6;

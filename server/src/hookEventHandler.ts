@@ -6,7 +6,7 @@ import type * as vscode from 'vscode';
 import { cancelPermissionTimer, cancelWaitingTimer } from '../../src/timerManager.js';
 import type { AgentState } from '../../src/types.js';
 import { HOOK_EVENT_BUFFER_MS, SESSION_END_GRACE_MS } from './constants.js';
-import type { AgentEvent, HookProvider } from './provider.js';
+import type { HookProvider, ProviderEvent } from './provider.js';
 import { getInlineTeammates, hasInlineTeammates } from './teamUtils.js';
 
 const debug = process.env.PIXEL_AGENTS_DEBUG !== '0';
@@ -139,8 +139,8 @@ export class HookEventHandler {
     // ── Provider normalization boundary ───────────────────────────────────────
     // All raw Claude-specific fields (tool_name, tool_input, agent_type, notification_type,
     // reason, source) are extracted by provider.normalizeHookEvent. Downstream dispatch
-    // uses the normalized AgentEvent.kind. Raw `event.*` reads are still allowed in a few
-    // places for provider-specific metadata that AgentEvent doesn't capture (transcript_path,
+    // uses the normalized ProviderEvent.kind. Raw `event.*` reads are still allowed in a few
+    // places for provider-specific metadata that ProviderEvent doesn't capture (transcript_path,
     // cwd for external-session adoption; agent_type for teammate routing).
     const normalized = this.provider.normalizeHookEvent(event);
     if (!normalized) return; // unknown / uninteresting event -- silently drop
@@ -311,7 +311,7 @@ export class HookEventHandler {
 
     const webview = this.getWebview();
 
-    // Dispatch on normalized AgentEvent.kind, not raw hook event names.
+    // Dispatch on normalized ProviderEvent.kind, not raw hook event names.
     // The TeammateIdle / TaskCompleted hooks normalize to `subagentTurnEnd` -- both
     // carry `agent_type` in the raw payload, which we pass to the team-routing handler.
     switch (normEvent.kind) {
@@ -358,7 +358,7 @@ export class HookEventHandler {
    * exit/logout marks agent waiting or triggers cleanup.
    */
   private handleSessionEnd(
-    normEvent: Extract<AgentEvent, { kind: 'sessionEnd' }>,
+    normEvent: Extract<ProviderEvent, { kind: 'sessionEnd' }>,
     agent: AgentState,
     agentId: number,
     webview: vscode.Webview | undefined,
@@ -401,7 +401,7 @@ export class HookEventHandler {
    * This just ensures the character starts animating without waiting for the 500ms JSONL poll.
    */
   private handlePreToolUse(
-    normEvent: Extract<AgentEvent, { kind: 'toolStart' }>,
+    normEvent: Extract<ProviderEvent, { kind: 'toolStart' }>,
     agent: AgentState,
     agentId: number,
     webview: vscode.Webview | undefined,
@@ -477,7 +477,7 @@ export class HookEventHandler {
 
   // NOTE: PostToolUseFailure used to have its own handler. The behavior was identical
   // to PostToolUse (emit agentToolDone, clear currentHookToolId). Both now normalize to
-  // the 'toolEnd' AgentEvent kind and share handlePostToolUse.
+  // the 'toolEnd' ProviderEvent kind and share handlePostToolUse.
 
   /**
    * Handle SubagentStart: notify webview that a sub-agent is spawning.

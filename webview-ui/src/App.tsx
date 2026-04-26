@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
-import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
+import { AgentGrid } from './components/dashboard/AgentGrid.js';
+import { AlertsPanel } from './components/dashboard/AlertsPanel.js';
+import { TimelinePanel } from './components/dashboard/TimelinePanel.js';
 import { DebugView } from './components/DebugView.js';
 import { DemoControls } from './components/DemoControls.js';
-import { EditActionBar } from './components/EditActionBar.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
+import { TopBar } from './components/TopBar.js';
 import { Modal } from './components/ui/Modal.js';
-import { VersionIndicator } from './components/VersionIndicator.js';
-import { ZoomControls } from './components/ZoomControls.js';
+import {
+  selectActiveAlerts,
+  selectPendingPermissions,
+  selectRealAgents,
+  selectRecentTimeline,
+} from './domain/selectors.js';
+import { useAgentControlCenter } from './hooks/useAgentControlCenter.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
@@ -38,9 +45,6 @@ function getOfficeState(): OfficeState {
 }
 
 function App() {
-  // Always dispatch asset init messages in browser runtime (tiles, sprites, layout, settings).
-  // In standalone mode, re-dispatch settingsLoaded with soundEnabled: true immediately after,
-  // because dispatchMockMessages sends soundEnabled: false which would override the WS setting.
   useEffect(() => {
     if (isBrowserRuntime) {
       void import('./browserMock.js').then(({ dispatchMockMessages }) => {
@@ -90,7 +94,13 @@ function App() {
     hooksInfoShown,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
-  // Show migration notice once layout reset is detected
+  // Domain store — bridges legacy state into normalized Agent/Timeline/Alert model
+  const domainState = useAgentControlCenter(agents, agentTools, agentStatuses, getOfficeState);
+  const realAgents = selectRealAgents(domainState);
+  const pendingPermissions = selectPendingPermissions(domainState);
+  const recentTimeline = selectRecentTimeline(domainState);
+  const activeAlerts = selectActiveAlerts(domainState);
+
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
   const showMigrationNotice = layoutWasReset && !migrationNoticeDismissed;
 
@@ -100,6 +110,8 @@ function App() {
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(true);
+  const [selectedDomainAgent, setSelectedDomainAgent] = useState<string | undefined>();
 
   const currentMajorMinor = toMajorMinor(extensionVersion);
 
@@ -112,7 +124,6 @@ function App() {
     vscode.postMessage({ type: 'setLastSeenVersion', version: currentMajorMinor });
   }, [currentMajorMinor]);
 
-  // Sync alwaysShowOverlay from persisted settings
   useEffect(() => {
     setAlwaysShowOverlay(alwaysShowLabels);
   }, [alwaysShowLabels]);
@@ -130,6 +141,7 @@ function App() {
     vscode.postMessage({ type: 'focusAgent', id });
   }, []);
 
+  // Points to the canvas container so ToolOverlay positions correctly
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [editorTickForKeyboard, setEditorTickForKeyboard] = useState(0);
@@ -150,7 +162,6 @@ function App() {
   }, []);
 
   const handleClick = useCallback((agentId: number) => {
-    // If clicked agent is a sub-agent, focus the parent's terminal instead
     const os = getOfficeState();
     const meta = os.subagentMeta.get(agentId);
     const focusId = meta ? meta.parentAgentId : agentId;
@@ -159,10 +170,8 @@ function App() {
 
   const officeState = getOfficeState();
 
-  // Force dependency on editorTickForKeyboard to propagate keyboard-triggered re-renders
   void editorTickForKeyboard;
 
-  // Show "Press R to rotate" hint when a rotatable item is selected or being placed
   const showRotateHint =
     editor.isEditMode &&
     (() => {
@@ -182,127 +191,178 @@ function App() {
     })();
 
   if (!layoutReady) {
-    return <div className="w-full h-full flex items-center justify-center ">Loading...</div>;
+    return <div className="w-full h-full flex items-center justify-center">Loading...</div>;
   }
 
+  const showDashboard = isDashboardOpen && !isDebugMode;
+
   return (
-    <div ref={containerRef} className="w-full h-full relative overflow-hidden">
-      <OfficeCanvas
-        officeState={officeState}
-        onClick={handleClick}
+    <div className="w-full h-full flex flex-col overflow-hidden">
+      <TopBar
         isEditMode={editor.isEditMode}
-        editorState={editorState}
-        onEditorTileAction={editor.handleEditorTileAction}
-        onEditorEraseAction={editor.handleEditorEraseAction}
-        onEditorSelectionChange={editor.handleEditorSelectionChange}
-        onDeleteSelected={editor.handleDeleteSelected}
-        onRotateSelected={editor.handleRotateSelected}
-        onDragMove={editor.handleDragMove}
-        editorTick={editor.editorTick}
+        isDirty={editor.isDirty}
+        canUndo={editorState.undoStack.length > 0}
+        canRedo={editorState.redoStack.length > 0}
+        onToggleEditMode={editor.handleToggleEditMode}
+        onUndo={editor.handleUndo}
+        onRedo={editor.handleRedo}
+        onSave={editor.handleSave}
+        onReset={editor.handleReset}
+        showRotateHint={showRotateHint}
+        isSettingsOpen={isSettingsOpen}
+        onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+        isDashboardOpen={isDashboardOpen}
+        onToggleDashboard={() => setIsDashboardOpen((v) => !v)}
+        workspaceFolders={workspaceFolders}
         zoom={editor.zoom}
         onZoomChange={editor.handleZoomChange}
-        panRef={editor.panRef}
+        currentVersion={extensionVersion}
+        lastSeenVersion={lastSeenVersion}
+        onDismissVersion={handleWhatsNewDismiss}
+        onOpenChangelog={handleOpenChangelog}
       />
 
-      {!isDebugMode ? (
-        <>
-          <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
-
-          {/* Vignette overlay */}
+      {/* Main area: optional sidebars + canvas */}
+      <div className="flex-1 flex overflow-hidden bg-bg">
+        {/* Left sidebar — Agent cards + permissions */}
+        {showDashboard && (
           <div
-            className="absolute inset-0 pointer-events-none"
-            style={{ background: 'var(--vignette)' }}
-          />
+            className="flex-shrink-0 border-r-2 border-border overflow-hidden bg-bg"
+            style={{ width: 220 }}
+          >
+            <AgentGrid
+              agents={realAgents}
+              pendingPermissions={pendingPermissions}
+              selectedAgentId={selectedDomainAgent}
+              onSelectAgent={setSelectedDomainAgent}
+            />
+          </div>
+        )}
 
-          {editor.isEditMode && editor.isDirty && (
-            <EditActionBar editor={editor} editorState={editorState} />
-          )}
-
-          {showRotateHint && (
-            <div
-              className="absolute left-1/2 -translate-x-1/2 z-11 bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none whitespace-nowrap"
-              style={{ top: editor.isDirty ? 64 : 8 }}
-            >
-              Rotate (R)
-            </div>
-          )}
-
-          {editor.isEditMode &&
-            (() => {
-              const selUid = editorState.selectedFurnitureUid;
-              const selColor = selUid
-                ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ?? null)
-                : null;
-              return (
-                <EditorToolbar
-                  activeTool={editorState.activeTool}
-                  selectedTileType={editorState.selectedTileType}
-                  selectedFurnitureType={editorState.selectedFurnitureType}
-                  selectedFurnitureUid={selUid}
-                  selectedFurnitureColor={selColor}
-                  floorColor={editorState.floorColor}
-                  wallColor={editorState.wallColor}
-                  selectedWallSet={editorState.selectedWallSet}
-                  onToolChange={editor.handleToolChange}
-                  onTileTypeChange={editor.handleTileTypeChange}
-                  onFloorColorChange={editor.handleFloorColorChange}
-                  onWallColorChange={editor.handleWallColorChange}
-                  onWallSetChange={editor.handleWallSetChange}
-                  onSelectedFurnitureColorChange={editor.handleSelectedFurnitureColorChange}
-                  onFurnitureTypeChange={editor.handleFurnitureTypeChange}
-                  loadedAssets={loadedAssets}
-                />
-              );
-            })()}
-
-          <ToolOverlay
+        {/* Canvas area */}
+        <div ref={containerRef} className="flex-1 relative overflow-hidden">
+          <OfficeCanvas
             officeState={officeState}
-            agents={agents}
-            agentTools={agentTools}
-            subagentCharacters={subagentCharacters}
-            containerRef={containerRef}
+            onClick={handleClick}
+            isEditMode={editor.isEditMode}
+            editorState={editorState}
+            onEditorTileAction={editor.handleEditorTileAction}
+            onEditorEraseAction={editor.handleEditorEraseAction}
+            onEditorSelectionChange={editor.handleEditorSelectionChange}
+            onDeleteSelected={editor.handleDeleteSelected}
+            onRotateSelected={editor.handleRotateSelected}
+            onDragMove={editor.handleDragMove}
+            editorTick={editor.editorTick}
             zoom={editor.zoom}
+            onZoomChange={editor.handleZoomChange}
             panRef={editor.panRef}
-            onCloseAgent={handleCloseAgent}
-            alwaysShowOverlay={alwaysShowOverlay}
           />
-        </>
-      ) : (
-        <DebugView
-          agents={agents}
-          selectedAgent={selectedAgent}
-          agentTools={agentTools}
-          agentStatuses={agentStatuses}
-          subagentTools={subagentTools}
-          onSelectAgent={handleSelectAgent}
-        />
-      )}
 
-      {/* Hooks first-run tooltip */}
-      {!hooksInfoShown && !hooksTooltipDismissed && (
-        <Tooltip
-          title="Instant Detection Active"
-          position="top-right"
-          onDismiss={() => {
-            setHooksTooltipDismissed(true);
-            vscode.postMessage({ type: 'setHooksInfoShown' });
-          }}
-        >
-          <span className="text-sm text-text leading-none">
-            Your agents now respond in real-time.{' '}
-            <span
-              className="text-accent cursor-pointer underline"
-              onClick={() => {
-                setIsHooksInfoOpen(true);
+          {!isDebugMode ? (
+            <>
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{ background: 'var(--vignette)' }}
+              />
+
+              {editor.isEditMode &&
+                (() => {
+                  const selUid = editorState.selectedFurnitureUid;
+                  const selColor = selUid
+                    ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ??
+                      null)
+                    : null;
+                  return (
+                    <EditorToolbar
+                      activeTool={editorState.activeTool}
+                      selectedTileType={editorState.selectedTileType}
+                      selectedFurnitureType={editorState.selectedFurnitureType}
+                      selectedFurnitureUid={selUid}
+                      selectedFurnitureColor={selColor}
+                      floorColor={editorState.floorColor}
+                      wallColor={editorState.wallColor}
+                      selectedWallSet={editorState.selectedWallSet}
+                      onToolChange={editor.handleToolChange}
+                      onTileTypeChange={editor.handleTileTypeChange}
+                      onFloorColorChange={editor.handleFloorColorChange}
+                      onWallColorChange={editor.handleWallColorChange}
+                      onWallSetChange={editor.handleWallSetChange}
+                      onSelectedFurnitureColorChange={editor.handleSelectedFurnitureColorChange}
+                      onFurnitureTypeChange={editor.handleFurnitureTypeChange}
+                      loadedAssets={loadedAssets}
+                    />
+                  );
+                })()}
+
+              <ToolOverlay
+                officeState={officeState}
+                agents={agents}
+                agentTools={agentTools}
+                subagentCharacters={subagentCharacters}
+                containerRef={containerRef}
+                zoom={editor.zoom}
+                panRef={editor.panRef}
+                onCloseAgent={handleCloseAgent}
+                alwaysShowOverlay={alwaysShowOverlay}
+              />
+            </>
+          ) : (
+            <DebugView
+              agents={agents}
+              selectedAgent={selectedAgent}
+              agentTools={agentTools}
+              agentStatuses={agentStatuses}
+              subagentTools={subagentTools}
+              onSelectAgent={handleSelectAgent}
+            />
+          )}
+
+          {/* Hooks first-run tooltip */}
+          {!hooksInfoShown && !hooksTooltipDismissed && (
+            <Tooltip
+              title="Instant Detection Active"
+              position="top-right"
+              onDismiss={() => {
                 setHooksTooltipDismissed(true);
                 vscode.postMessage({ type: 'setHooksInfoShown' });
               }}
             >
-              View more
-            </span>
-          </span>
-        </Tooltip>
-      )}
+              <span className="text-sm text-text leading-none">
+                Your agents now respond in real-time.{' '}
+                <span
+                  className="text-accent cursor-pointer underline"
+                  onClick={() => {
+                    setIsHooksInfoOpen(true);
+                    setHooksTooltipDismissed(true);
+                    vscode.postMessage({ type: 'setHooksInfoShown' });
+                  }}
+                >
+                  View more
+                </span>
+              </span>
+            </Tooltip>
+          )}
+
+          {isBrowserRuntime && <DemoControls />}
+        </div>
+
+        {/* Right sidebar — Timeline + Alerts */}
+        {showDashboard && (
+          <div
+            className="flex-shrink-0 border-l-2 border-border overflow-hidden flex flex-col bg-bg"
+            style={{ width: 220 }}
+          >
+            <div className="flex-1 overflow-hidden">
+              <TimelinePanel events={recentTimeline} />
+            </div>
+            {activeAlerts.length > 0 && (
+              <div className="flex-shrink-0 border-t-2 border-border overflow-hidden">
+                <AlertsPanel alerts={activeAlerts} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Hooks info modal */}
       <Modal
@@ -336,28 +396,6 @@ function App() {
         </div>
       </Modal>
 
-      <BottomToolbar
-        isEditMode={editor.isEditMode}
-        onOpenClaude={editor.handleOpenClaude}
-        onToggleEditMode={editor.handleToggleEditMode}
-        isSettingsOpen={isSettingsOpen}
-        onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        workspaceFolders={workspaceFolders}
-      />
-
-      <VersionIndicator
-        currentVersion={extensionVersion}
-        lastSeenVersion={lastSeenVersion}
-        onDismiss={handleWhatsNewDismiss}
-        onOpenChangelog={handleOpenChangelog}
-      />
-
-      <ChangelogModal
-        isOpen={isChangelogOpen}
-        onClose={() => setIsChangelogOpen(false)}
-        currentVersion={extensionVersion}
-      />
-
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -380,11 +418,15 @@ function App() {
         }}
       />
 
+      <ChangelogModal
+        isOpen={isChangelogOpen}
+        onClose={() => setIsChangelogOpen(false)}
+        currentVersion={extensionVersion}
+      />
+
       {showMigrationNotice && (
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
       )}
-
-      {isBrowserRuntime && <DemoControls />}
     </div>
   );
 }

@@ -502,6 +502,7 @@ function adoptTerminalForFile(
     linesProcessed: 0,
     seenUnknownRecordTypes: new Set(),
     hookDelivered: false,
+    providerId: 'claude',
     inputTokens: 0,
     outputTokens: 0,
   };
@@ -683,6 +684,7 @@ export function scanForTeammateFiles(
       // (agentToolStart messages). Permission events are routed from the lead's
       // hooks via handlePermissionRequest forwarding.
       hookDelivered: false,
+      providerId: parentAgent?.providerId ?? 'claude',
       lastDataAt: Date.now(),
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
@@ -831,6 +833,7 @@ export function adoptExternalSessionFromHook(
   webview: vscode.Webview | undefined,
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
+  providerId = 'claude',
 ): void {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
@@ -859,6 +862,7 @@ export function adoptExternalSessionFromHook(
       webview,
       persistAgents,
       folderName,
+      providerId,
     );
 
     const adoptedAgent = [...agents.values()].find((a) => a.jsonlFile === transcriptPath);
@@ -870,6 +874,8 @@ export function adoptExternalSessionFromHook(
     if (adoptedAgent) {
       adoptedAgent.sessionId = sessionId;
       adoptedAgent.hookDelivered = true;
+      adoptedAgent.providerId = providerId;
+      persistAgents();
       onAgentCreated?.(adoptedAgent);
     }
   } else {
@@ -896,6 +902,7 @@ export function adoptExternalSessionFromHook(
       hadToolsInTurn: false,
       hookDelivered: true,
       hooksOnly: true,
+      providerId,
       lastDataAt: Date.now(),
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
@@ -927,6 +934,7 @@ function adoptExternalSession(
   webview: vscode.Webview | undefined,
   persistAgents: () => void,
   folderName?: string,
+  providerId = 'claude',
 ): void {
   const id = nextAgentIdRef.current++;
   // Skip to end of file -- only show live activity going forward, not replay history
@@ -956,6 +964,7 @@ function adoptExternalSession(
     permissionSent: false,
     hadToolsInTurn: false,
     hookDelivered: false,
+    providerId,
     lastDataAt: Date.now(),
     linesProcessed: 0,
     seenUnknownRecordTypes: new Set(),

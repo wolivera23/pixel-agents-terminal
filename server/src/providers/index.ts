@@ -11,5 +11,37 @@
  * than reaching into each provider directory directly.
  */
 
+import type { HookProvider } from '../provider.js';
+import { claudeProvider } from './hook/claude/claude.js';
+import {
+  copyHookScript as copyClaudeHookScript,
+  installHooks as installClaudeHooks,
+  uninstallHooks as uninstallClaudeHooks,
+} from './hook/claude/claudeHookInstaller.js';
+import { codexProvider } from './hook/codex/codex.js';
+import {
+  copyHookScript as copyCodexHookScript,
+  installHooks as installCodexHooks,
+  uninstallHooks as uninstallCodexHooks,
+} from './hook/codex/codexHookInstaller.js';
+
 export { claudeProvider } from './hook/claude/claude.js';
-export { copyHookScript } from './hook/claude/claudeHookInstaller.js';
+export { codexProvider } from './hook/codex/codex.js';
+
+export const hookProviders: HookProvider[] = [claudeProvider, codexProvider];
+export const hookProvidersById = new Map(hookProviders.map((provider) => [provider.id, provider]));
+
+export function installAllHooks(): void {
+  installClaudeHooks();
+  installCodexHooks();
+}
+
+export function uninstallAllHooks(): void {
+  uninstallClaudeHooks();
+  uninstallCodexHooks();
+}
+
+export function copyAllHookScripts(extensionPath: string): void {
+  copyClaudeHookScript(extensionPath);
+  copyCodexHookScript(extensionPath);
+}

@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { JSONL_POLL_INTERVAL_MS } from '../server/src/constants.js';
+import type { HookProvider } from '../server/src/provider.js';
+import { claudeProvider } from '../server/src/providers/index.js';
 import {
   TERMINAL_NAME_PREFIX,
   WORKSPACE_KEY_AGENT_SEATS,
@@ -19,13 +21,26 @@ import { migrateAndLoadLayout } from './layoutPersistence.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import type { AgentState, PersistedAgent } from './types.js';
 
-export function getProjectDirPath(cwd?: string): string {
+function quoteShellArg(arg: string): string {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '\\"')}"`;
+}
+
+function buildTerminalCommand(command: string, args: string[]): string {
+  return [command, ...args.map(quoteShellArg)].join(' ');
+}
+
+export function getProjectDirPath(cwd?: string, provider: HookProvider = claudeProvider): string {
   // Fall back to home directory when no workspace folder is open.
   // This is the common case on Linux/macOS when VS Code is launched without a folder
   // (e.g. `code` with no arguments). Claude Code writes JSONL files to
   // ~/.claude/projects/<hash>/ where <hash> is derived from the process cwd, so we
   // must use the same directory as the terminal's working directory.
   const workspacePath = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+  const providerDirs = provider.getSessionDirs?.(workspacePath);
+  if (provider.id !== 'claude' && providerDirs?.[0]) {
+    return providerDirs[0];
+  }
   const dirName = workspacePath.replace(/[^a-zA-Z0-9-]/g, '-');
   const projectDir = path.join(os.homedir(), '.claude', 'projects', dirName);
   console.log(`[Pixel Agents] Terminal: Project dir: ${workspacePath} → ${dirName}`);
@@ -76,6 +91,8 @@ export async function launchNewTerminal(
   persistAgents: () => void,
   folderPath?: string,
   bypassPermissions?: boolean,
+  provider: HookProvider = claudeProvider,
+  onAgentSessionChanged?: (agent: AgentState) => void,
 ): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   // Use home directory as fallback cwd when no workspace is open (common on Linux/macOS).
@@ -85,22 +102,27 @@ export async function launchNewTerminal(
   const isMultiRoot = !!(folders && folders.length > 1);
   const idx = nextTerminalIndexRef.current++;
   const terminal = vscode.window.createTerminal({
-    name: `${TERMINAL_NAME_PREFIX} #${idx}`,
+    name: `${provider.displayName || TERMINAL_NAME_PREFIX} #${idx}`,
     cwd,
   });
   terminal.show();
 
   const sessionId = crypto.randomUUID();
-  const claudeCmd = bypassPermissions
-    ? `claude --session-id ${sessionId} --dangerously-skip-permissions`
-    : `claude --session-id ${sessionId}`;
-  terminal.sendText(claudeCmd);
+  const launch = provider.buildLaunchCommand?.(sessionId, cwd, { bypassPermissions }) ?? {
+    command: 'claude',
+    args: ['--session-id', sessionId],
+  };
+  terminal.sendText(buildTerminalCommand(launch.command, launch.args));
 
-  const projectDir = getProjectDirPath(cwd);
+  const expectedTranscript = provider.getExpectedTranscript?.(sessionId, cwd);
+  const projectDir =
+    expectedTranscript?.projectDir ?? provider.getSessionDirs?.(cwd)[0] ?? getProjectDirPath(cwd);
 
   // Pre-register expected JSONL file so project scan won't treat it as a /clear file
-  const expectedFile = path.join(projectDir, `${sessionId}.jsonl`);
-  knownJsonlFiles.add(expectedFile);
+  const expectedFile = expectedTranscript?.transcriptPath ?? '';
+  if (expectedFile) {
+    knownJsonlFiles.add(expectedFile);
+  }
 
   // Create agent immediately (before JSONL file exists)
   const id = nextAgentIdRef.current++;
@@ -128,6 +150,7 @@ export async function launchNewTerminal(
     seenUnknownRecordTypes: new Set(),
     folderName,
     hookDelivered: false,
+    providerId: provider.id,
     inputTokens: 0,
     outputTokens: 0,
   };
@@ -136,31 +159,51 @@ export async function launchNewTerminal(
   activeAgentIdRef.current = id;
   persistAgents();
   console.log(`[Pixel Agents] Terminal: Agent ${id} - created for terminal ${terminal.name}`);
-  webview?.postMessage({ type: 'agentCreated', id, folderName });
+  webview?.postMessage({ type: 'agentCreated', id, folderName, providerId: agent.providerId });
 
-  ensureProjectScan(
-    projectDir,
-    knownJsonlFiles,
-    projectScanTimerRef,
-    activeAgentIdRef,
-    nextAgentIdRef,
-    agents,
-    fileWatchers,
-    pollingTimers,
-    waitingTimers,
-    permissionTimers,
-    webview,
-    persistAgents,
-  );
+  if (expectedFile) {
+    ensureProjectScan(
+      projectDir,
+      knownJsonlFiles,
+      projectScanTimerRef,
+      activeAgentIdRef,
+      nextAgentIdRef,
+      agents,
+      fileWatchers,
+      pollingTimers,
+      waitingTimers,
+      permissionTimers,
+      webview,
+      persistAgents,
+    );
+  }
 
   // Poll for the specific JSONL file to appear
   const createdAt = Date.now();
   let pollCount = 0;
-  console.log(`[Pixel Agents] Terminal: Agent ${id} - waiting for JSONL at ${agent.jsonlFile}`);
+  console.log(
+    `[Pixel Agents] Terminal: Agent ${id} - waiting for ${provider.displayName} transcript${agent.jsonlFile ? ` at ${agent.jsonlFile}` : ''}`,
+  );
   const pollTimer = setInterval(() => {
     pollCount++;
     try {
-      if (fs.existsSync(agent.jsonlFile)) {
+      const trackedFiles = new Set([
+        ...knownJsonlFiles,
+        ...[...agents.values()].map((a) => a.jsonlFile),
+      ]);
+      const discovered = agent.jsonlFile
+        ? null
+        : provider.findTranscript?.(cwd, createdAt, trackedFiles);
+      if (discovered) {
+        agent.sessionId = discovered.sessionId;
+        agent.projectDir = discovered.projectDir;
+        agent.jsonlFile = discovered.transcriptPath;
+        knownJsonlFiles.add(discovered.transcriptPath);
+        persistAgents();
+        onAgentSessionChanged?.(agent);
+      }
+
+      if (agent.jsonlFile && fs.existsSync(agent.jsonlFile)) {
         console.log(
           `[Pixel Agents] Terminal: Agent ${id} - found JSONL file ${path.basename(agent.jsonlFile)} (after ${pollCount}s)`,
         );
@@ -196,9 +239,9 @@ export async function launchNewTerminal(
         }
         console.warn(
           `[Pixel Agents] Terminal: Agent ${id} - JSONL file not found after 10s. ` +
-            `Expected: ${agent.jsonlFile}. ${dirContents}`,
+            `Expected: ${agent.jsonlFile || `${provider.displayName} transcript for ${cwd}`}. ${dirContents}`,
         );
-      } else if (pollCount > 10) {
+      } else if (pollCount > 10 && agent.jsonlFile) {
         // Possible /resume: terminal started a different session than expected.
         // Check every tick for a file modified after the agent was created.
         try {
@@ -299,6 +342,7 @@ export function persistAgents(
       isTeamLead: agent.isTeamLead,
       leadAgentId: agent.leadAgentId,
       teamUsesTmux: agent.teamUsesTmux,
+      providerId: agent.providerId,
     });
   }
   context.workspaceState.update(WORKSPACE_KEY_AGENTS, persisted);
@@ -377,6 +421,7 @@ export function restoreAgents(
       hookDelivered: false,
       inputTokens: 0,
       outputTokens: 0,
+      providerId: p.providerId ?? 'claude',
       teamName: p.teamName,
       agentName: p.agentName,
       isTeamLead: p.isTeamLead,

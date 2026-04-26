@@ -63,12 +63,19 @@ describe('claudeProvider', () => {
       expect(result?.event.kind).toBe('toolEnd');
     });
 
-    it('normalizes PostToolUseFailure to toolEnd (same as PostToolUse)', () => {
+    it('normalizes PostToolUseFailure to failed toolEnd', () => {
       const result = claudeProvider.normalizeHookEvent({
         hook_event_name: 'PostToolUseFailure',
         session_id: 'sess-1',
+        tool_name: 'Bash',
+        error: 'Command failed',
       });
       expect(result?.event.kind).toBe('toolEnd');
+      if (result?.event.kind === 'toolEnd') {
+        expect(result.event.success).toBe(false);
+        expect(result.event.toolName).toBe('Bash');
+        expect(result.event.error).toBe('Command failed');
+      }
     });
 
     it('normalizes Stop to turnEnd', () => {

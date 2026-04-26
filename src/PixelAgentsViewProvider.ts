@@ -6,10 +6,13 @@ import * as vscode from 'vscode';
 import type { HookEvent } from '../server/src/hookEventHandler.js';
 import { HookEventHandler } from '../server/src/hookEventHandler.js';
 import {
-  installHooks,
-  uninstallHooks,
-} from '../server/src/providers/hook/claude/claudeHookInstaller.js';
-import { claudeProvider, copyHookScript } from '../server/src/providers/index.js';
+  claudeProvider,
+  copyAllHookScripts,
+  hookProviders,
+  hookProvidersById,
+  installAllHooks,
+  uninstallAllHooks,
+} from '../server/src/providers/index.js';
 import { PixelAgentsServer } from '../server/src/server.js';
 import {
   getProjectDirPath,
@@ -62,7 +65,7 @@ import {
 } from './fileWatcher.js';
 import type { LayoutWatcher } from './layoutPersistence.js';
 import { readLayoutFromFile, watchLayoutFile, writeLayoutToFile } from './layoutPersistence.js';
-import { setHookProvider } from './transcriptParser.js';
+import { setHookProviders } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 
 export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
@@ -105,7 +108,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   // Pixel Agents Server (hook event reception)
   private pixelAgentsServer: PixelAgentsServer | null = null;
   // ServerConfig is not stored as a field; use this.pixelAgentsServer?.getConfig() if needed.
-  private hookEventHandler: HookEventHandler | null = null;
+  private hookEventHandlers = new Map<string, HookEventHandler>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.initHooks();
@@ -124,52 +127,35 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   };
 
   private initHooks(): void {
-    this.hookEventHandler = new HookEventHandler(
-      this.agents,
-      this.waitingTimers,
-      this.permissionTimers,
-      () => this.webview,
-      claudeProvider,
-      this.watchAllSessions,
-    );
+    setHookProviders(hookProviders);
+    for (const provider of hookProviders) {
+      const handler = new HookEventHandler(
+        this.agents,
+        this.waitingTimers,
+        this.permissionTimers,
+        () => this.webview,
+        provider,
+        this.watchAllSessions,
+      );
+      this.hookEventHandlers.set(provider.id, handler);
 
-    // Register Claude's team provider (if present on the hook provider) with the file
-    // watcher module + transcriptParser, plus the teammate removal callback.
-    if (claudeProvider.team) {
-      setTeamProvider(claudeProvider.team);
-    }
-    setHookProvider(claudeProvider);
-    setTeammateRemovalCallback((id) => this.removeTeammate(id, 'team-config'));
+      if (provider.team) {
+        setTeamProvider(provider.team);
+      }
 
-    this.hookEventHandler.setLifecycleCallbacks({
-      onExternalSessionDetected: (sessionId, transcriptPath, cwd) => {
-        // Workspace filtering: only adopt if in a tracked project dir or Watch All Sessions is ON
-        const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
-        if (!isTrackedProjectDir(projectDir) && !this.watchAllSessions.current) {
-          return; // Not our workspace and Watch All is OFF, ignore
-        }
-        adoptExternalSessionFromHook(
-          sessionId,
-          transcriptPath,
-          cwd,
-          this.knownJsonlFiles,
-          this.nextAgentId,
-          this.agents,
-          this.fileWatchers,
-          this.pollingTimers,
-          this.waitingTimers,
-          this.permissionTimers,
-          this.webview,
-          this.persistAgents,
-          (agent) => this.registerAgentHook(agent),
-        );
-      },
-      onSessionClear: (agentId, newSessionId, newTranscriptPath) => {
-        if (newTranscriptPath) {
-          this.knownJsonlFiles.add(newTranscriptPath);
-          reassignAgentToFile(
-            agentId,
-            newTranscriptPath,
+      handler.setLifecycleCallbacks({
+        onExternalSessionDetected: (sessionId, transcriptPath, cwd) => {
+          // Workspace filtering: only adopt if in a tracked project dir or Watch All Sessions is ON
+          const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
+          if (!isTrackedProjectDir(projectDir) && !this.watchAllSessions.current) {
+            return; // Not our workspace and Watch All is OFF, ignore
+          }
+          adoptExternalSessionFromHook(
+            sessionId,
+            transcriptPath,
+            cwd,
+            this.knownJsonlFiles,
+            this.nextAgentId,
             this.agents,
             this.fileWatchers,
             this.pollingTimers,
@@ -177,74 +163,94 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             this.permissionTimers,
             this.webview,
             this.persistAgents,
+            (agent) => this.registerAgentHook(agent),
+            provider.id,
           );
-        }
-        // Update session mapping for future hook events
-        const agent = this.agents.get(agentId);
-        if (agent) {
-          this.unregisterAgentHook(agent);
-          agent.sessionId = newSessionId;
-          this.registerAgentHook(agent);
-        }
-      },
-      onSessionResume: (transcriptPath) => {
-        // Clear dismissals so --resume can re-adopt the file
-        dismissedJsonlFiles.delete(transcriptPath);
-        seededMtimes.delete(transcriptPath);
-        this.knownJsonlFiles.delete(transcriptPath);
-      },
-      onTeammateDetected: (parentAgentId, sessionId, _agentType) => {
-        const parentAgent = this.agents.get(parentAgentId);
-        if (!parentAgent) return;
-        scanForTeammateFiles(
-          parentAgent.projectDir,
-          sessionId,
-          parentAgentId,
-          this.nextAgentId,
-          this.agents,
-          this.fileWatchers,
-          this.pollingTimers,
-          this.waitingTimers,
-          this.permissionTimers,
-          this.webview,
-          this.persistAgents,
-          (agent) => this.registerAgentHook(agent),
-        );
-      },
-      onTeammateRemoved: (teammateAgentId) => {
-        this.removeTeammate(teammateAgentId, 'hooks');
-      },
-      onSessionEnd: (agentId) => {
-        const agent = this.agents.get(agentId);
-        if (!agent) return;
-        // Dismiss the file so heuristic scanners don't re-adopt it
-        seededMtimes.delete(agent.jsonlFile);
-        dismissedJsonlFiles.set(agent.jsonlFile, Date.now());
-        // If this is a team lead, remove its teammates
-        if (agent.isTeamLead) {
-          this.removeTeammates(agentId);
-        }
-        // External agents: remove immediately (no terminal to keep alive)
-        if (agent.isExternal) {
-          this.unregisterAgentHook(agent);
-          removeAgent(
-            agentId,
+        },
+        onSessionClear: (agentId, newSessionId, newTranscriptPath) => {
+          if (newTranscriptPath) {
+            this.knownJsonlFiles.add(newTranscriptPath);
+            reassignAgentToFile(
+              agentId,
+              newTranscriptPath,
+              this.agents,
+              this.fileWatchers,
+              this.pollingTimers,
+              this.waitingTimers,
+              this.permissionTimers,
+              this.webview,
+              this.persistAgents,
+            );
+          }
+          // Update session mapping for future hook events
+          const agent = this.agents.get(agentId);
+          if (agent) {
+            this.unregisterAgentHook(agent);
+            agent.sessionId = newSessionId;
+            agent.providerId = provider.id;
+            this.registerAgentHook(agent);
+          }
+        },
+        onSessionResume: (transcriptPath) => {
+          // Clear dismissals so --resume can re-adopt the file
+          dismissedJsonlFiles.delete(transcriptPath);
+          seededMtimes.delete(transcriptPath);
+          this.knownJsonlFiles.delete(transcriptPath);
+        },
+        onTeammateDetected: (parentAgentId, sessionId, _agentType) => {
+          const parentAgent = this.agents.get(parentAgentId);
+          if (!parentAgent) return;
+          scanForTeammateFiles(
+            parentAgent.projectDir,
+            sessionId,
+            parentAgentId,
+            this.nextAgentId,
             this.agents,
             this.fileWatchers,
             this.pollingTimers,
             this.waitingTimers,
             this.permissionTimers,
-            this.jsonlPollTimers,
+            this.webview,
             this.persistAgents,
+            (agent) => this.registerAgentHook(agent),
           );
-          this.webview?.postMessage({ type: 'agentClosed', id: agentId });
-        }
-      },
-    });
+        },
+        onTeammateRemoved: (teammateAgentId) => {
+          this.removeTeammate(teammateAgentId, 'hooks');
+        },
+        onSessionEnd: (agentId) => {
+          const agent = this.agents.get(agentId);
+          if (!agent) return;
+          // Dismiss the file so heuristic scanners don't re-adopt it
+          seededMtimes.delete(agent.jsonlFile);
+          dismissedJsonlFiles.set(agent.jsonlFile, Date.now());
+          // If this is a team lead, remove its teammates
+          if (agent.isTeamLead) {
+            this.removeTeammates(agentId);
+          }
+          // External agents: remove immediately (no terminal to keep alive)
+          if (agent.isExternal) {
+            this.unregisterAgentHook(agent);
+            removeAgent(
+              agentId,
+              this.agents,
+              this.fileWatchers,
+              this.pollingTimers,
+              this.waitingTimers,
+              this.permissionTimers,
+              this.jsonlPollTimers,
+              this.persistAgents,
+            );
+            this.webview?.postMessage({ type: 'agentClosed', id: agentId });
+          }
+        },
+      });
+    }
+    setTeammateRemovalCallback((id) => this.removeTeammate(id, 'team-config'));
 
     this.pixelAgentsServer = new PixelAgentsServer();
     this.pixelAgentsServer.onHookEvent((providerId, event) => {
-      this.hookEventHandler?.handleEvent(providerId, event as HookEvent);
+      this.hookEventHandlers.get(providerId)?.handleEvent(providerId, event as HookEvent);
     });
 
     this.pixelAgentsServer
@@ -256,8 +262,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         const hooksEnabled = this.context.globalState.get<boolean>(GLOBAL_KEY_HOOKS_ENABLED, true);
         this.hooksEnabled.current = hooksEnabled;
         if (hooksEnabled) {
-          installHooks();
-          copyHookScript(this.context.extensionPath);
+          installAllHooks();
+          copyAllHookScripts(this.context.extensionPath);
         }
         console.log(`[Pixel Agents] Server: ready on port ${config.port}`);
       })
@@ -320,12 +326,14 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
    *  when an actual hook event arrives, preserving heuristic fallback for agents
    *  where hooks aren't working (older Claude, hooks not installed, etc.) */
   registerAgentHook(agent: AgentState): void {
-    this.hookEventHandler?.registerAgent(agent.sessionId, agent.id);
+    const providerId = agent.providerId ?? 'claude';
+    this.hookEventHandlers.get(providerId)?.registerAgent(agent.sessionId, agent.id);
   }
 
   /** Unregister an agent from the hook event handler */
   unregisterAgentHook(agent: AgentState): void {
-    this.hookEventHandler?.unregisterAgent(agent.sessionId);
+    const providerId = agent.providerId ?? 'claude';
+    this.hookEventHandlers.get(providerId)?.unregisterAgent(agent.sessionId);
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -335,6 +343,9 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (message.type === 'openClaude') {
+        const provider =
+          hookProvidersById.get((message.providerId as string | undefined) ?? 'claude') ??
+          claudeProvider;
         const prevAgentIds = new Set(this.agents.keys());
         await launchNewTerminal(
           this.nextAgentId,
@@ -352,6 +363,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           this.persistAgents,
           message.folderPath as string | undefined,
           message.bypassPermissions as boolean | undefined,
+          provider,
+          (agent) => this.registerAgentHook(agent),
         );
         // Register newly created agent(s) with hook handler
         for (const [id, agent] of this.agents) {
@@ -412,11 +425,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         this.context.globalState.update(GLOBAL_KEY_HOOKS_ENABLED, enabled);
         this.hooksEnabled.current = enabled;
         if (enabled) {
-          installHooks();
-          copyHookScript(this.context.extensionPath);
+          installAllHooks();
+          copyAllHookScripts(this.context.extensionPath);
           console.log('[Pixel Agents] Hooks enabled by user');
         } else {
-          uninstallHooks();
+          uninstallAllHooks();
           console.log('[Pixel Agents] Hooks disabled by user');
         }
       } else if (message.type === 'setHooksInfoShown') {
@@ -930,8 +943,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   dispose() {
     this.pixelAgentsServer?.stop();
     this.pixelAgentsServer = null;
-    this.hookEventHandler?.dispose();
-    this.hookEventHandler = null;
+    for (const handler of this.hookEventHandlers.values()) {
+      handler.dispose();
+    }
+    this.hookEventHandlers.clear();
     this.layoutWatcher?.dispose();
     this.layoutWatcher = null;
     for (const id of [...this.agents.keys()]) {

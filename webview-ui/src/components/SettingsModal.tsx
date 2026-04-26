@@ -1,11 +1,13 @@
 import { useState } from 'react';
 
+import { isSpeechEnabled, setSpeechEnabled } from '../agentSpeech.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
 import { vscode } from '../vscodeApi.js';
 import { Button } from './ui/Button.js';
 import { Checkbox } from './ui/Checkbox.js';
 import { MenuItem } from './ui/MenuItem.js';
 import { Modal } from './ui/Modal.js';
+import { VoiceSettingsPanel } from './VoiceSettingsPanel.js';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,6 +37,7 @@ export function SettingsModal({
   onToggleHooksEnabled,
 }: SettingsModalProps) {
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled);
+  const [speechLocal, setSpeechLocal] = useState(isSpeechEnabled);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Settings">
@@ -98,6 +101,16 @@ export function SettingsModal({
           vscode.postMessage({ type: 'setSoundEnabled', enabled: newVal });
         }}
       />
+      <Checkbox
+        label="Voice Notifications"
+        checked={speechLocal}
+        onChange={() => {
+          const newVal = !isSpeechEnabled();
+          setSpeechEnabled(newVal);
+          setSpeechLocal(newVal);
+        }}
+      />
+      {speechLocal && <VoiceSettingsPanel />}
       <Checkbox
         label="Watch All Sessions"
         checked={watchAllSessions}

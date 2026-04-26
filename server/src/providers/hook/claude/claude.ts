@@ -6,7 +6,7 @@ import {
   BASH_COMMAND_DISPLAY_MAX_LENGTH,
   TASK_DESCRIPTION_DISPLAY_MAX_LENGTH,
 } from '../../../constants.js';
-import type { AgentEvent, HookProvider } from '../../../provider.js';
+import type { HookProvider, ProviderEvent } from '../../../provider.js';
 import {
   areHooksInstalled as installerAreHooksInstalled,
   installHooks as installerInstallHooks,
@@ -96,15 +96,31 @@ function getSessionDirs(workspacePath: string): string[] {
 function buildLaunchCommand(
   sessionId: string,
   cwd: string,
+  options?: { bypassPermissions?: boolean },
 ): { command: string; args: string[]; env?: Record<string, string> } {
-  return { command: 'claude', args: ['--session-id', sessionId], env: { PWD: cwd } };
+  const args = ['--session-id', sessionId];
+  if (options?.bypassPermissions) {
+    args.push('--dangerously-skip-permissions');
+  }
+  return { command: 'claude', args, env: { PWD: cwd } };
+}
+
+function getExpectedTranscript(
+  sessionId: string,
+  cwd: string,
+): { transcriptPath: string; projectDir: string } {
+  const projectDir = getSessionDirs(cwd)[0];
+  return {
+    transcriptPath: path.join(projectDir, `${sessionId}.jsonl`),
+    projectDir,
+  };
 }
 
 // ── normalizeHookEvent: the single Claude-specific normalization boundary ──
 //
 // All raw Claude hook payload fields (tool_name, tool_input, agent_type, etc.) are
 // read HERE and HERE ONLY. Downstream (hookEventHandler.ts) sees only the normalized
-// AgentEvent union.
+// ProviderEvent union.
 //
 // Sentinel 'current' toolIds are returned for PostToolUse/SubagentStop because the
 // raw hook payload doesn't carry the id; the handler correlates using its own
@@ -113,7 +129,7 @@ function buildLaunchCommand(
 
 function normalizeHookEvent(
   raw: Record<string, unknown>,
-): { sessionId: string; event: AgentEvent } | null {
+): { sessionId: string; event: ProviderEvent } | null {
   const eventName = raw.hook_event_name;
   const sessionId = raw.session_id;
   if (typeof eventName !== 'string' || typeof sessionId !== 'string') return null;
@@ -137,8 +153,19 @@ function normalizeHookEvent(
     }
 
     case 'PostToolUse':
-    case 'PostToolUseFailure':
       return { sessionId, event: { kind: 'toolEnd', toolId: 'current' } };
+
+    case 'PostToolUseFailure':
+      return {
+        sessionId,
+        event: {
+          kind: 'toolEnd',
+          toolId: 'current',
+          success: false,
+          toolName: typeof raw.tool_name === 'string' ? raw.tool_name : undefined,
+          error: typeof raw.error === 'string' ? raw.error : undefined,
+        },
+      };
 
     case 'Stop':
       return { sessionId, event: { kind: 'turnEnd' } };
@@ -167,13 +194,27 @@ function normalizeHookEvent(
       };
 
     case 'PermissionRequest':
-      return { sessionId, event: { kind: 'permissionRequest' } };
+      return {
+        sessionId,
+        event: {
+          kind: 'permissionRequest',
+          toolName: typeof raw.tool_name === 'string' ? raw.tool_name : undefined,
+          input: raw.tool_input,
+        },
+      };
 
     case 'Notification': {
       const notificationType =
         typeof raw.notification_type === 'string' ? raw.notification_type : '';
       if (notificationType === 'permission_prompt') {
-        return { sessionId, event: { kind: 'permissionRequest' } };
+        return {
+          sessionId,
+          event: {
+            kind: 'permissionRequest',
+            toolName: typeof raw.tool_name === 'string' ? raw.tool_name : undefined,
+            input: raw.tool_input,
+          },
+        };
       }
       if (notificationType === 'idle_prompt') {
         return { sessionId, event: { kind: 'turnEnd' } };
@@ -208,7 +249,7 @@ function normalizeHookEvent(
         event: { kind: 'subagentTurnEnd', parentToolId: 'current' },
       };
 
-    // TaskCreated is informational; no AgentEvent shape fits it. Drop.
+    // TaskCreated is informational; no ProviderEvent shape fits it. Drop.
     case 'TaskCreated':
     default:
       return null;
@@ -251,6 +292,7 @@ export const claudeProvider: HookProvider = {
   getSessionDirs,
   sessionFilePattern: '*.jsonl',
   buildLaunchCommand,
+  getExpectedTranscript,
 
   team: claudeTeamProvider,
 };
