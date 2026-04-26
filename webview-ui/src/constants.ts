@@ -111,6 +111,19 @@ export const PERMISSION_NOTE_2_START_SEC = 0.12;
 export const PERMISSION_NOTE_DURATION_SEC = 0.15;
 export const PERMISSION_VOLUME = 0.12;
 
+// ── Tool Start Sound (short square-wave blip) ───────────────
+export const TOOL_START_NOTE_HZ = 523.25; // C5
+export const TOOL_START_NOTE_DURATION_SEC = 0.055;
+export const TOOL_START_VOLUME = 0.06;
+
+// ── Agent Spawn Sound (ascending C5→E5→G5 arpeggio) ────────
+export const SPAWN_NOTE_1_HZ = 523.25; // C5
+export const SPAWN_NOTE_2_HZ = 659.25; // E5
+export const SPAWN_NOTE_3_HZ = 783.99; // G5
+export const SPAWN_NOTE_STAGGER_SEC = 0.09;
+export const SPAWN_NOTE_DURATION_SEC = 0.14;
+export const SPAWN_VOLUME = 0.09;
+
 // ── Furniture Animation ─────────────────────────────────────
 export const FURNITURE_ANIM_INTERVAL_SEC = 0.2;
 
