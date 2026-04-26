@@ -160,6 +160,12 @@ async function main(): Promise<void> {
   wss.on('connection', (ws) => {
     clients.add(ws);
     console.log(`[Pixel Agents] Browser connected (${clients.size} active)`);
+
+    // Replay existing agents so a reconnecting browser doesn't miss agentCreated
+    for (const [, agentId] of sessionToAgentId) {
+      ws.send(JSON.stringify({ type: 'agentCreated', id: agentId }));
+    }
+
     ws.on('close', () => {
       clients.delete(ws);
       console.log(`[Pixel Agents] Browser disconnected (${clients.size} active)`);
