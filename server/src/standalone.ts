@@ -61,6 +61,9 @@ function getOrCreateAgent(sessionId: string, cwd?: string): { id: number; isNew:
 function handleHookEvent(_providerId: string, event: Record<string, unknown>): void {
   const sessionId = event.session_id as string | undefined;
   const hookName = event.hook_event_name as string | undefined;
+  console.log(
+    `[Hook] ${hookName ?? '?'} | session: ${sessionId?.slice(0, 8) ?? '?'} | clients: ${clients.size}`,
+  );
   if (!sessionId || !hookName) return;
 
   const { id } = getOrCreateAgent(sessionId, event.cwd as string | undefined);

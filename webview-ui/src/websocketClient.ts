@@ -34,7 +34,8 @@ export function tryConnectWebSocket(port = 3000): Promise<boolean> {
 
       ws.addEventListener('message', (event) => {
         try {
-          const data = JSON.parse(event.data as string) as unknown;
+          const data = JSON.parse(event.data as string) as Record<string, unknown>;
+          console.log('[Pixel Agents] WS message received:', data.type, data);
           window.dispatchEvent(new MessageEvent('message', { data }));
         } catch {
           // malformed message — ignore
