@@ -70,8 +70,15 @@ export interface DomainCloseAgentMessage {
   id: number;
 }
 
+export interface DomainRenameAgentMessage {
+  type: 'renameAgent';
+  id: number;
+  displayName: string;
+}
+
 export type DomainWsClientMessage =
   | DomainPermissionDecisionRequest
   | DomainSyncRequestMessage
   | DomainSaveLayoutMessage
-  | DomainCloseAgentMessage;
+  | DomainCloseAgentMessage
+  | DomainRenameAgentMessage;

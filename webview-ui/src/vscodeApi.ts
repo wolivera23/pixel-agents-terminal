@@ -33,6 +33,19 @@ export const vscode: { postMessage(msg: unknown): void } = isBrowserRuntime
             sendDomainMessage({ type: 'closeAgent', id: m['id'] });
           });
         }
+        if (
+          m['type'] === 'renameAgent' &&
+          typeof m['id'] === 'number' &&
+          typeof m['displayName'] === 'string'
+        ) {
+          void import('./websocketClient.js').then(({ sendDomainMessage }) => {
+            sendDomainMessage({
+              type: 'renameAgent',
+              id: m['id'],
+              displayName: m['displayName'],
+            });
+          });
+        }
         console.log('[vscode.postMessage]', msg);
       },
     }

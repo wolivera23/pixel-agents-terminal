@@ -1,5 +1,6 @@
 import * as path from 'path';
 
+import { AGENT_DISPLAY_NAMES } from '../constants.js';
 import type { HookProvider } from '../provider.js';
 import { AgentStateStore } from './agentStateStore.js';
 import { normalizeProviderEventToAgentEvents } from './eventNormalizer.js';
@@ -22,6 +23,7 @@ export interface HandleHookEventResult {
   isNewAgent: boolean;
   providerId: string;
   folderName?: string;
+  displayName: string;
   domainMessages: DomainWsMessage[];
 }
 
@@ -29,6 +31,7 @@ export interface LegacyReplayAgent {
   agentId: number;
   providerId: string;
   folderName?: string;
+  displayName: string;
 }
 
 function toDomainSource(providerId: string): AgentSource {
@@ -91,7 +94,7 @@ export class DomainSessionBridge {
     const sessionId = event.session_id;
     if (typeof sessionId !== 'string') return null;
 
-    const { agentId, isNewAgent, folderName } = this.getOrCreateAgent(
+    const { agentId, isNewAgent, folderName, displayName } = this.getOrCreateAgent(
       sessionId,
       providerId,
       typeof event.cwd === 'string' ? event.cwd : undefined,
@@ -112,10 +115,9 @@ export class DomainSessionBridge {
     }
 
     if (!normalized) {
-      return { agentId, isNewAgent, providerId, folderName, domainMessages };
+      return { agentId, isNewAgent, providerId, folderName, displayName, domainMessages };
     }
 
-    const timelineBefore = this.domainStore.getTimeline().length;
     const alertsBefore = this.domainStore.getAlerts().length;
     const permissionsBefore = this.domainStore.getPendingPermissions().length;
 
@@ -127,6 +129,7 @@ export class DomainSessionBridge {
     });
 
     for (const domainEvent of domainEvents) {
+      const previousTimelineEvent = this.domainStore.getTimeline().at(-1);
       const updatedAgent = this.domainStore.applyEvent(domainEvent);
       domainMessages.push({
         type: 'domainEvent',
@@ -138,7 +141,12 @@ export class DomainSessionBridge {
       } satisfies DomainAgentUpsertedMessage);
 
       const latestTimelineEvent = this.domainStore.getTimeline().at(-1);
-      if (this.domainStore.getTimeline().length > timelineBefore && latestTimelineEvent) {
+      if (
+        latestTimelineEvent &&
+        (latestTimelineEvent.id !== previousTimelineEvent?.id ||
+          latestTimelineEvent.timestamp !== previousTimelineEvent?.timestamp ||
+          latestTimelineEvent.message !== previousTimelineEvent?.message)
+      ) {
         domainMessages.push({
           type: 'domainTimelineAppended',
           event: latestTimelineEvent,
@@ -171,7 +179,7 @@ export class DomainSessionBridge {
       }
     }
 
-    return { agentId, isNewAgent, providerId, folderName, domainMessages };
+    return { agentId, isNewAgent, providerId, folderName, displayName, domainMessages };
   }
 
   handleClientMessage(msg: DomainWsClientMessage): DomainWsMessage[] {
@@ -215,6 +223,28 @@ export class DomainSessionBridge {
     return messages;
   }
 
+  renameAgent(agentId: number, displayName: string): DomainWsMessage[] {
+    const agent = this.domainStore.getAgent(String(agentId));
+    if (!agent) return [];
+
+    const renamedAgent = this.domainStore.upsertAgent({
+      ...agent,
+      name: displayName,
+    });
+
+    const replayAgent = this.legacyReplayAgents.get(agentId);
+    if (replayAgent) {
+      this.legacyReplayAgents.set(agentId, { ...replayAgent, displayName });
+    }
+
+    return [
+      {
+        type: 'domainAgentUpserted',
+        agent: renamedAgent,
+      } satisfies DomainAgentUpsertedMessage,
+    ];
+  }
+
   private buildPermissionsMessage(): DomainPermissionsMessage {
     return {
       type: 'domainPermissions',
@@ -226,25 +256,36 @@ export class DomainSessionBridge {
     sessionId: string,
     providerId: string,
     cwd?: string,
-  ): { agentId: number; isNewAgent: boolean; folderName?: string } {
+  ): { agentId: number; isNewAgent: boolean; folderName?: string; displayName: string } {
     if (this.sessionToAgentId.has(sessionId)) {
       const agentId = this.sessionToAgentId.get(sessionId)!;
       this.upsertAgent(agentId, providerId, cwd ? path.basename(cwd) : undefined);
-      return { agentId, isNewAgent: false, folderName: cwd ? path.basename(cwd) : undefined };
+      const displayName =
+        this.domainStore.getAgent(String(agentId))?.name ?? this.displayNameFor(agentId);
+      return {
+        agentId,
+        isNewAgent: false,
+        folderName: cwd ? path.basename(cwd) : undefined,
+        displayName,
+      };
     }
 
     const agentId = this.nextAgentId++;
     this.sessionToAgentId.set(sessionId, agentId);
     const folderName = cwd ? path.basename(cwd) : undefined;
     this.upsertAgent(agentId, providerId, folderName);
-    return { agentId, isNewAgent: true, folderName };
+    return { agentId, isNewAgent: true, folderName, displayName: this.displayNameFor(agentId) };
   }
 
   private upsertAgent(agentId: number, providerId: string, folderName?: string): void {
     const existing = this.domainStore.getAgent(String(agentId));
-    const fallbackName =
-      folderName && folderName.trim().length > 0 ? folderName : `Agent ${agentId}`;
-    this.legacyReplayAgents.set(agentId, { agentId, providerId, folderName });
+    const fallbackName = this.displayNameFor(agentId);
+    this.legacyReplayAgents.set(agentId, {
+      agentId,
+      providerId,
+      folderName,
+      displayName: existing?.name ?? fallbackName,
+    });
     this.domainStore.upsertAgent({
       id: String(agentId),
       name: existing?.name ?? fallbackName,
@@ -261,5 +302,12 @@ export class DomainSessionBridge {
       loopDetected: existing?.loopDetected,
       muted: existing?.muted,
     });
+  }
+
+  private displayNameFor(agentId: number): string {
+    const index = (agentId - 1) % AGENT_DISPLAY_NAMES.length;
+    const round = Math.floor((agentId - 1) / AGENT_DISPLAY_NAMES.length);
+    const base = AGENT_DISPLAY_NAMES[index];
+    return round === 0 ? base : `${base} ${round + 1}`;
   }
 }

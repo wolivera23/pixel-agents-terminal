@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { displayNameForAgentId } from '../core/agentNames.js';
 import { type AgentMap, reduceAgentEvent } from '../core/agentState.js';
 import { normalizeToAgentEvent } from '../core/eventNormalizer.js';
-import { agentEventToTimelineEvent } from '../core/timeline.js';
+import { appendHumanizedTimelineEvent } from '../core/timeline.js';
 // Dev speech and context_warning are now driven by useAgentControlCenter via speechMapper.
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -87,16 +88,6 @@ function appendBounded<T>(items: T[], nextItem: T, limit: number): T[] {
   return [...items, nextItem];
 }
 
-function shouldAppendNormalizedTimelineEvent(event: AgentEvent): boolean {
-  if (event.type === 'agent_action' && event.title === 'Token usage updated') {
-    return false;
-  }
-  if (event.type === 'agent_action' && event.title === 'Agent event') {
-    return false;
-  }
-  return true;
-}
-
 function saveAgentSeats(os: OfficeState): void {
   const seats: Record<number, { palette: number; hueShift: number; seatId: string | null }> = {};
   for (const ch of os.characters.values()) {
@@ -147,6 +138,7 @@ export function useExtensionMessages(
       hueShift?: number;
       seatId?: string;
       folderName?: string;
+      displayName?: string;
     }> = [];
 
     const handler = (e: MessageEvent) => {
@@ -159,12 +151,9 @@ export function useExtensionMessages(
           appendBounded(prev, normalizedEvent, NORMALIZED_EVENT_HISTORY_LIMIT),
         );
         setNormalizedAgents((prev) => reduceAgentEvent(prev, normalizedEvent));
-        if (shouldAppendNormalizedTimelineEvent(normalizedEvent)) {
-          const timelineEvent = agentEventToTimelineEvent(normalizedEvent);
-          setNormalizedTimeline((prev) =>
-            appendBounded(prev, timelineEvent, NORMALIZED_TIMELINE_LIMIT),
-          );
-        }
+        setNormalizedTimeline((prev) =>
+          appendHumanizedTimelineEvent(prev, normalizedEvent, NORMALIZED_TIMELINE_LIMIT),
+        );
 
         if (import.meta.env.DEV) {
           console.debug('[Pixel Agents] Normalized AgentEvent', normalizedEvent);
@@ -188,7 +177,7 @@ export function useExtensionMessages(
         }
         // Add buffered agents now that layout (and seats) are correct
         for (const p of pendingAgents) {
-          os.addAgent(p.id, p.palette, p.hueShift, p.seatId, true, p.folderName);
+          os.addAgent(p.id, p.palette, p.hueShift, p.seatId, true, p.folderName, p.displayName);
         }
         pendingAgents = [];
         layoutReadyRef.current = true;
@@ -202,6 +191,7 @@ export function useExtensionMessages(
       } else if (msg.type === 'agentCreated') {
         const id = msg.id as number;
         const folderName = msg.folderName as string | undefined;
+        const displayName = (msg.displayName as string | undefined) ?? displayNameForAgentId(id);
         const isTeammate = msg.isTeammate as boolean | undefined;
         const teammateName = msg.teammateName as string | undefined;
         const teammateParentId = msg.parentAgentId as number | undefined;
@@ -217,7 +207,15 @@ export function useExtensionMessages(
           const parentCh = os.characters.get(teammateParentId);
           const palette = parentCh ? parentCh.palette : undefined;
           const hueShift = parentCh ? parentCh.hueShift : undefined;
-          os.addAgent(id, palette, hueShift, undefined, undefined, parentCh?.folderName);
+          os.addAgent(
+            id,
+            palette,
+            hueShift,
+            undefined,
+            undefined,
+            parentCh?.folderName,
+            displayName,
+          );
           // Set team metadata on the character
           const ch = os.characters.get(id);
           if (ch) {
@@ -226,7 +224,7 @@ export function useExtensionMessages(
             ch.agentName = teammateName;
           }
         } else {
-          os.addAgent(id, undefined, undefined, undefined, undefined, folderName);
+          os.addAgent(id, undefined, undefined, undefined, undefined, folderName, displayName);
         }
         saveAgentSeats(os);
       } else if (msg.type === 'agentClosed') {
@@ -261,6 +259,21 @@ export function useExtensionMessages(
         os.removeAllSubagents(id);
         setSubagentCharacters((prev) => prev.filter((s) => s.parentAgentId !== id));
         os.removeAgent(id);
+      } else if (msg.type === 'agentRenamed') {
+        const id = msg.id as number;
+        const displayName = msg.displayName as string | undefined;
+        if (displayName) {
+          const ch = os.characters.get(id);
+          if (ch) {
+            ch.displayName = displayName;
+          }
+          setNormalizedAgents((prev) => {
+            const key = String(id);
+            const agent = prev[key];
+            if (!agent) return prev;
+            return { ...prev, [key]: { ...agent, name: displayName } };
+          });
+        }
       } else if (msg.type === 'existingAgents') {
         const incoming = msg.agents as number[];
         const meta = (msg.agentMeta || {}) as Record<
@@ -268,6 +281,7 @@ export function useExtensionMessages(
           { palette?: number; hueShift?: number; seatId?: string }
         >;
         const folderNames = (msg.folderNames || {}) as Record<number, string>;
+        const displayNames = (msg.displayNames || {}) as Record<number, string>;
         // Buffer agents — they'll be added in layoutLoaded after seats are built
         for (const id of incoming) {
           const m = meta[id];
@@ -277,6 +291,7 @@ export function useExtensionMessages(
             hueShift: m?.hueShift,
             seatId: m?.seatId,
             folderName: folderNames[id],
+            displayName: displayNames[id] ?? displayNameForAgentId(id),
           });
         }
         setAgents((prev) => {

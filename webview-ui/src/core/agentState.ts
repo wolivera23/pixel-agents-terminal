@@ -1,4 +1,5 @@
 import type { Agent, AgentEvent, AgentKind, AgentState } from '../types/agentControl.js';
+import { displayNameForAgentId } from './agentNames.js';
 
 export type AgentMap = Record<string, Agent>;
 
@@ -38,9 +39,10 @@ function createAgentFromEvent(event: AgentEvent): Agent {
   return {
     id: event.agentId,
     name:
+      getMetadataString(metadata, 'agentDisplayName') ??
       getMetadataString(metadata, 'agentName') ??
       getMetadataString(metadata, 'folderName') ??
-      `Agent ${event.agentId}`,
+      displayNameForAgentId(event.agentId),
     type: asAgentKind(metadata?.['agentKind']),
     source: event.source,
     state: asAgentState(metadata?.['agentState'], 'idle'),
@@ -103,10 +105,12 @@ export function reduceAgentEvent(agents: AgentMap, event: AgentEvent): AgentMap 
       break;
   }
 
+  const agentDisplayName = getMetadataString(metadata, 'agentDisplayName');
   const agentName = getMetadataString(metadata, 'agentName');
   const agentKind = metadata?.['agentKind'];
   const muted = metadata?.['muted'];
-  if (agentName) next.name = agentName;
+  if (agentDisplayName) next.name = agentDisplayName;
+  else if (agentName) next.name = agentName;
   if (agentKind !== undefined) next.type = asAgentKind(agentKind);
   if (typeof muted === 'boolean') next.muted = muted;
 

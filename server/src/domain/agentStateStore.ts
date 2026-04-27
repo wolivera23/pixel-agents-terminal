@@ -1,3 +1,4 @@
+import { TIMELINE_GROUP_WINDOW_MS, TIMELINE_TOOL_SUMMARY_LIMIT } from '../constants.js';
 import {
   type Agent,
   type AgentEvent,
@@ -20,34 +21,104 @@ function trimToLimit<T>(list: T[], maxItems: number): T[] {
   return list.length <= maxItems ? list : list.slice(list.length - maxItems);
 }
 
-function buildTimelineMessage(event: AgentEvent, agent: Agent): string {
+const NOISY_TOOL_NAMES = new Set(['typing', 'reviewing', 'cleaning']);
+const INTERNAL_TITLES = new Set([
+  'Agent active',
+  'Agent event',
+  'Agent reported progress',
+  'Token usage updated',
+  'Tool finished',
+  'Subagent tool finished',
+]);
+const ACTIVITY_TYPES = new Set<AgentEventType>([
+  AgentEventType.TOOL_USE,
+  AgentEventType.COMMAND_STARTED,
+  AgentEventType.FILE_CHANGED,
+]);
+
+interface TimelineHumanizedMetadata extends Record<string, unknown> {
+  humanized?: {
+    kind: 'activity';
+    rawEventIds: string[];
+    toolLabels: string[];
+  };
+}
+
+function metadataString(event: AgentEvent, key: string): string | undefined {
+  const value = event.metadata?.[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function isNoisyTimelineEvent(event: AgentEvent): boolean {
+  const toolName = metadataString(event, 'toolName')?.toLowerCase();
+  if (toolName && NOISY_TOOL_NAMES.has(toolName)) return true;
+  if (INTERNAL_TITLES.has(event.title)) return true;
+  if (event.type === AgentEventType.COMMAND_FINISHED && event.severity === EventSeverity.SUCCESS) {
+    return true;
+  }
+  if (event.type === AgentEventType.AGENT_ACTION && event.severity === EventSeverity.INFO) {
+    return true;
+  }
+  return false;
+}
+
+function toolLabel(event: AgentEvent): string {
+  const toolName = metadataString(event, 'toolName');
+  const filePath = metadataString(event, 'filePath');
+  const command = metadataString(event, 'command');
+
+  if (command) return 'ejecutando comandos';
+  if (filePath) {
+    if (toolName?.toLowerCase().includes('read')) return 'leyendo archivos';
+    if (toolName?.toLowerCase().includes('edit') || toolName?.toLowerCase().includes('write')) {
+      return 'editando archivos';
+    }
+    return 'trabajando con archivos';
+  }
+  if (toolName) return `usando ${toolName}`;
+  if (event.description) return event.description;
+  return 'trabajando';
+}
+
+function summarizeToolLabels(labels: string[]): string {
+  const unique = [...new Set(labels)];
+  const visible = unique.slice(0, TIMELINE_TOOL_SUMMARY_LIMIT);
+  const hiddenCount = unique.length - visible.length;
+  return hiddenCount > 0 ? `${visible.join(', ')} y ${hiddenCount} mas` : visible.join(', ');
+}
+
+function buildActivityMessage(agent: Agent, labels: string[]): string {
+  return `${agent.name} esta ${summarizeToolLabels(labels)}.`;
+}
+
+function buildTimelineMessage(event: AgentEvent, agent: Agent): string | null {
   switch (event.type) {
     case AgentEventType.AGENT_STARTED:
-      return `${agent.name} empezo una sesion.`;
+      return `${agent.name} inicio una sesion.`;
     case AgentEventType.AGENT_IDLE:
       return `${agent.name} quedo inactivo.`;
     case AgentEventType.AGENT_ACTION:
-      return `${agent.name} registro actividad.`;
+      return null;
     case AgentEventType.TOOL_USE:
-      return `${agent.name} uso ${event.metadata?.['toolName'] ?? 'una herramienta'}.`;
+      return buildActivityMessage(agent, [toolLabel(event)]);
     case AgentEventType.COMMAND_STARTED:
-      return `${agent.name} inicio un comando.`;
+      return buildActivityMessage(agent, [toolLabel(event)]);
     case AgentEventType.COMMAND_FINISHED:
-      return `${agent.name} termino un comando.`;
+      return null;
     case AgentEventType.PERMISSION_REQUEST:
       if (typeof event.metadata?.['command'] === 'string') {
-        return `${agent.name} pidio permiso para ejecutar un comando.`;
+        return `${agent.name} necesita permiso para ejecutar un comando.`;
       }
       if (typeof event.metadata?.['filePath'] === 'string') {
-        return `${agent.name} pidio permiso para modificar un archivo.`;
+        return `${agent.name} necesita permiso para cambiar un archivo.`;
       }
-      return `${agent.name} pidio permiso para continuar.`;
+      return `${agent.name} necesita permiso para continuar.`;
     case AgentEventType.PERMISSION_APPROVED:
-      return `${agent.name} recibio una aprobacion.`;
+      return `${agent.name} recibio aprobacion.`;
     case AgentEventType.PERMISSION_REJECTED:
-      return `${agent.name} recibio un rechazo.`;
+      return `${agent.name} no recibio permiso.`;
     case AgentEventType.TASK_COMPLETED:
-      return `${agent.name} termino correctamente.`;
+      return `${agent.name} termino el turno.`;
     case AgentEventType.TASK_FAILED:
       return `${agent.name} no pudo completar la tarea.`;
     case AgentEventType.ERROR:
@@ -55,16 +126,99 @@ function buildTimelineMessage(event: AgentEvent, agent: Agent): string {
     case AgentEventType.CONTEXT_WARNING:
       return `${agent.name} se acerca al limite de contexto.`;
     case AgentEventType.LOOP_DETECTED:
-      return `${agent.name} podria estar en un loop.`;
+      return `${agent.name} podria estar trabado en un loop.`;
     case AgentEventType.BLOCKED:
-      return `${agent.name} parece bloqueado.`;
+      return `${agent.name} esta bloqueado.`;
     case AgentEventType.FILE_CHANGED:
-      return `${agent.name} modifico archivos.`;
+      return buildActivityMessage(agent, [toolLabel(event)]);
     default: {
       const exhaustiveCheck: never = event.type;
       return exhaustiveCheck;
     }
   }
+}
+
+function shouldMergeWithPrevious(previous: TimelineEvent, event: AgentEvent): boolean {
+  const metadata = previous.metadata as TimelineHumanizedMetadata | undefined;
+  return (
+    metadata?.humanized?.kind === 'activity' &&
+    previous.agentId === event.agentId &&
+    ACTIVITY_TYPES.has(event.type) &&
+    event.timestamp - previous.timestamp <= TIMELINE_GROUP_WINDOW_MS
+  );
+}
+
+function buildTimelineEvent(event: AgentEvent, agent: Agent): TimelineEvent | null {
+  if (isNoisyTimelineEvent(event)) return null;
+
+  const message = buildTimelineMessage(event, agent);
+  if (!message) return null;
+
+  const label = ACTIVITY_TYPES.has(event.type) ? toolLabel(event) : undefined;
+  return {
+    id: `${event.id}:timeline`,
+    timestamp: event.timestamp,
+    agentId: event.agentId,
+    severity: event.severity,
+    message,
+    metadata: {
+      ...event.metadata,
+      rawEventId: event.id,
+      rawEventType: event.type,
+      ...(label
+        ? {
+            humanized: {
+              kind: 'activity',
+              rawEventIds: [event.id],
+              toolLabels: [label],
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+function appendHumanizedTimelineEvent(
+  timeline: TimelineEvent[],
+  event: AgentEvent,
+  agent: Agent,
+  maxItems: number,
+): TimelineEvent[] {
+  if (isNoisyTimelineEvent(event)) return timeline;
+
+  const previous = timeline.at(-1);
+  if (previous && shouldMergeWithPrevious(previous, event)) {
+    const previousMetadata = previous.metadata as TimelineHumanizedMetadata;
+    const previousHumanized = previousMetadata.humanized!;
+    const toolLabels = [...previousHumanized.toolLabels, toolLabel(event)];
+    const rawEventIds = [...previousHumanized.rawEventIds, event.id];
+    const merged: TimelineEvent = {
+      ...previous,
+      timestamp: event.timestamp,
+      severity:
+        event.severity === EventSeverity.WARNING ||
+        event.severity === EventSeverity.ERROR ||
+        event.severity === EventSeverity.CRITICAL
+          ? event.severity
+          : previous.severity,
+      message: buildActivityMessage(agent, toolLabels),
+      metadata: {
+        ...previous.metadata,
+        latestRawEventId: event.id,
+        latestRawEventType: event.type,
+        humanized: {
+          kind: 'activity',
+          rawEventIds,
+          toolLabels,
+        },
+      },
+    };
+    return [...timeline.slice(0, -1), merged];
+  }
+
+  const timelineEvent = buildTimelineEvent(event, agent);
+  if (!timelineEvent) return timeline;
+  return trimToLimit([...timeline, timelineEvent], maxItems);
 }
 
 function shouldRaiseAlert(event: AgentEvent): boolean {
@@ -265,15 +419,12 @@ export class AgentStateStore {
 
     this.events = trimToLimit([...this.events, event], this.maxEvents);
 
-    const timelineEvent: TimelineEvent = {
-      id: `${event.id}:timeline`,
-      timestamp: event.timestamp,
-      agentId: event.agentId,
-      severity: event.severity,
-      message: buildTimelineMessage(event, next),
-      metadata: event.metadata,
-    };
-    this.timeline = trimToLimit([...this.timeline, timelineEvent], this.maxTimelineEvents);
+    this.timeline = appendHumanizedTimelineEvent(
+      this.timeline,
+      event,
+      next,
+      this.maxTimelineEvents,
+    );
 
     if (event.type === AgentEventType.PERMISSION_REQUEST) {
       this.permissions.set(event.id, {

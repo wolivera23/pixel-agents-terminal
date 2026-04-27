@@ -41,7 +41,7 @@ describe('domain types', () => {
       timestamp: 1,
       agentId: agent.id,
       severity: EventSeverity.INFO,
-      message: 'Backend Agent empezo una tarea.',
+      message: 'Backend Agent inicio una tarea.',
     };
 
     const alert: Alert = {
@@ -65,7 +65,7 @@ describe('domain types', () => {
 
     expect(agent.state).toBe(AgentRuntimeState.RUNNING);
     expect(event.type).toBe(AgentEventType.COMMAND_STARTED);
-    expect(timelineEvent.message).toContain('empezo');
+    expect(timelineEvent.message).toContain('inicio');
     expect(alert.kind).toBe(AgentEventType.PERMISSION_REQUEST);
     expect(permission.status).toBe('pending');
   });

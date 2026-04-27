@@ -48,7 +48,7 @@ function getActivityText(
     // Find the latest non-done tool
     const activeTool = [...tools].reverse().find((t) => !t.done);
     if (activeTool) {
-      if (activeTool.permissionWait) return 'Needs approval';
+      if (activeTool.permissionWait) return 'Necesita aprobacion';
       return activeTool.status;
     }
     // All tools done but agent still active (mid-turn) — keep showing last tool status
@@ -58,7 +58,7 @@ function getActivityText(
     }
   }
 
-  return 'Idle';
+  return 'Inactivo';
 }
 
 function getFuelColor(ratio: number): string {
@@ -132,10 +132,10 @@ export function ToolOverlay({
         let activityText: string;
         if (isSub) {
           if (subHasPermission) {
-            activityText = 'Needs approval';
+            activityText = 'Necesita aprobacion';
           } else {
             const sub = subagentCharacters.find((s) => s.id === id);
-            activityText = sub ? sub.label : 'Subtask';
+            activityText = sub ? sub.label : 'Subtarea';
           }
         } else {
           activityText = getActivityText(id, agentTools, ch.isActive);
@@ -158,10 +158,11 @@ export function ToolOverlay({
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const totalTokens = ch.inputTokens + ch.outputTokens;
         const tokenRatio = totalTokens / MAX_CONTEXT_TOKENS;
-        const hasExtraLines = !!(ch.folderName || teamRoleLabel);
+        const displayName = ch.displayName ?? (isSub ? null : `Agente ${id}`);
+        const hasExtraLines = !!(displayName || ch.folderName || teamRoleLabel);
 
         const showFull = isSelected || isHovered || (alwaysShowOverlay && !isSub);
-        const nameLabel = ch.folderName ?? ch.agentName ?? (isSub ? null : `Agent ${id}`);
+        const nameLabel = displayName ?? ch.agentName ?? ch.folderName;
 
         return (
           <div
@@ -196,6 +197,11 @@ export function ToolOverlay({
                       {teamRoleLabel}
                     </span>
                   )}
+                  {displayName && (
+                    <span className="text-2xs leading-none overflow-hidden text-ellipsis block">
+                      {displayName}
+                    </span>
+                  )}
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"
                     style={{
@@ -219,7 +225,7 @@ export function ToolOverlay({
                       e.stopPropagation();
                       onCloseAgent(id);
                     }}
-                    title="Close agent"
+                    title="Cerrar agente"
                     className="ml-2 shrink-0 leading-none"
                   >
                     ×

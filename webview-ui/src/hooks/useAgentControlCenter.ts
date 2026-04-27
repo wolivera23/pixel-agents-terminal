@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef } from 'react';
 
 import { MAX_CONTEXT_TOKENS, TOKEN_WARN_THRESHOLD } from '../constants.js';
+import { displayNameForAgentId } from '../core/agentNames.js';
 import { rebuildSnapshotCaches } from '../domain/cacheSync.js';
 import type { DomainState } from '../domain/reducer.js';
 import { domainReducer, initialDomainState } from '../domain/reducer.js';
@@ -121,17 +122,17 @@ function toLegacyRuntimeState(
 function stateToTimelineMessage(name: string, state: AgentRuntimeState): string {
   switch (state) {
     case AgentRuntimeState.RUNNING:
-      return `${name} empezó a trabajar.`;
+      return `${name} empezo a trabajar.`;
     case AgentRuntimeState.WAITING_PERMISSION:
       return `${name} espera permiso para continuar.`;
     case AgentRuntimeState.IDLE:
-      return `${name} terminó correctamente.`;
+      return `${name} termino correctamente.`;
     case AgentRuntimeState.DONE:
-      return `${name} completó la tarea.`;
+      return `${name} completo la tarea.`;
     case AgentRuntimeState.ERROR:
-      return `${name} encontró un error.`;
+      return `${name} encontro un error.`;
     case AgentRuntimeState.BLOCKED:
-      return `${name} quedó bloqueado.`;
+      return `${name} quedo bloqueado.`;
   }
 }
 
@@ -266,6 +267,19 @@ export function useAgentControlCenter(
           break;
         }
 
+        case 'agentRenamed': {
+          const agentId = String(msg.id as number);
+          const displayName = msg.displayName as string | undefined;
+          if (displayName) {
+            agentNamesRef.current.set(agentId, displayName);
+            dispatch({
+              type: 'PATCH_AGENTS',
+              agents: [{ id: agentId, name: displayName }],
+            });
+          }
+          break;
+        }
+
         case 'domainTimelineAppended': {
           hasDomainSourceRef.current = true;
           const { event } = msg as unknown as DomainTimelineAppendedMessage;
@@ -319,14 +333,15 @@ export function useAgentControlCenter(
 
           if (!contextWarnedRef.current.has(agentId) && usage >= TOKEN_WARN_THRESHOLD) {
             contextWarnedRef.current.add(agentId);
-            const name = agentNamesRef.current.get(agentId) ?? `Agent ${msg.id as number}`;
+            const name =
+              agentNamesRef.current.get(agentId) ?? displayNameForAgentId(msg.id as number);
             const now = Date.now();
             const warnTimeline: TimelineEvent = {
               id: `ctx-warn:${agentId}:${now}`,
               timestamp: now,
               agentId,
               severity: EventSeverity.WARNING,
-              message: `${name} se acerca al límite de contexto.`,
+              message: `${name} se acerca al limite de contexto.`,
             };
             const warnAlert: Alert = {
               id: `ctx-alert:${agentId}:${now}`,
@@ -334,7 +349,7 @@ export function useAgentControlCenter(
               agentId,
               severity: EventSeverity.WARNING,
               kind: AgentEventType.CONTEXT_WARNING,
-              title: `${name} se acerca al límite de contexto.`,
+              title: `${name} se acerca al limite de contexto.`,
             };
             dispatch({ type: 'ADD_TIMELINE', events: [warnTimeline] });
             dispatch({ type: 'ADD_ALERTS', alerts: [warnAlert] });
@@ -370,7 +385,7 @@ export function useAgentControlCenter(
 
     const domainAgents: Agent[] = legacyAgents.map((id) => {
       const ch = os.characters.get(id);
-      const name = ch?.agentName ?? ch?.folderName ?? `Agent ${id}`;
+      const name = ch?.displayName ?? ch?.agentName ?? ch?.folderName ?? displayNameForAgentId(id);
       const runtimeState = toLegacyRuntimeState(id, agentTools, agentStatuses);
       const currentTool = agentTools[id]?.find((t) => !t.done);
       const agentIdStr = String(id);

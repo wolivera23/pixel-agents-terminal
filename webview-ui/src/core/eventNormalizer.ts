@@ -132,12 +132,13 @@ export function normalizeToAgentEvent(rawMessage: unknown): AgentEvent | null {
     case 'agentCreated':
       return buildEvent(rawMessage, agentId, 'agent_started', 'info', 'Agent started', undefined, {
         agentKind: 'dev',
+        agentDisplayName: asString(rawMessage.displayName),
         agentName: asString(rawMessage.teammateName),
         folderName: asString(rawMessage.folderName),
         isTeammate: rawMessage.isTeammate === true,
       });
     case 'agentClosed':
-      return buildEvent(rawMessage, agentId, 'task_completed', 'success', 'Agent closed');
+      return buildEvent(rawMessage, agentId, 'agent_idle', 'info', 'Agent closed');
     case 'agentToolStart': {
       const toolName = asString(rawMessage.toolName) ?? asString(rawMessage.status) ?? 'Tool';
       const isCommand = COMMAND_TOOL_NAMES.has(toolName);

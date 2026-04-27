@@ -57,3 +57,41 @@ export const HOOK_EVENT_BUFFER_MS = 5_000;
  *  the agent is cleaned up instead of staying as a zombie with pendingClear forever. */
 export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
+
+// Timeline humanization
+export const TIMELINE_GROUP_WINDOW_MS = 30_000;
+export const TIMELINE_TOOL_SUMMARY_LIMIT = 3;
+export const AGENT_DISPLAY_NAME_MAX_LENGTH = 24;
+
+export const AGENT_DISPLAY_NAMES = [
+  'Ada',
+  'Turing',
+  'Grace',
+  'Linus',
+  'Margaret',
+  'Dennis',
+  'Barbara',
+  'Ken',
+  'Radia',
+  'Edsger',
+  'Tokyo',
+  'Paris',
+  'Lisbon',
+  'Berlin',
+  'Madrid',
+  'London',
+  'Rome',
+  'Vienna',
+  'Prague',
+  'Dublin',
+  'Seoul',
+  'Sydney',
+  'Cairo',
+  'Lima',
+  'Quito',
+  'Bogota',
+  'Havana',
+  'Oslo',
+  'Zurich',
+  'Boston',
+] as const;

@@ -337,6 +337,7 @@ export function persistAgents(
       jsonlFile: agent.jsonlFile,
       projectDir: agent.projectDir,
       folderName: agent.folderName,
+      displayName: agent.displayName,
       teamName: agent.teamName,
       agentName: agent.agentName,
       isTeamLead: agent.isTeamLead,
@@ -418,6 +419,7 @@ export function restoreAgents(
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
       folderName: p.folderName,
+      displayName: p.displayName,
       hookDelivered: false,
       inputTokens: 0,
       outputTokens: 0,
@@ -578,10 +580,14 @@ export function sendExistingAgents(
 
   // Include folderName and isExternal per agent
   const folderNames: Record<number, string> = {};
+  const displayNames: Record<number, string> = {};
   const externalAgents: Record<number, boolean> = {};
   for (const [id, agent] of agents) {
     if (agent.folderName) {
       folderNames[id] = agent.folderName;
+    }
+    if (agent.displayName) {
+      displayNames[id] = agent.displayName;
     }
     if (agent.isExternal) {
       externalAgents[id] = true;
@@ -596,6 +602,7 @@ export function sendExistingAgents(
     agents: agentIds,
     agentMeta,
     folderNames,
+    displayNames,
     externalAgents,
   });
   // Note: sendCurrentAgentStatuses is called separately AFTER layoutLoaded

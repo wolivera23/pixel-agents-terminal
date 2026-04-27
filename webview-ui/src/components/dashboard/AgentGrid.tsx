@@ -10,6 +10,7 @@ interface AgentGridProps {
   onFocusAgent?: (id: string) => void;
   onToggleMuteAgent?: (id: string) => void;
   onCloseAgent?: (id: string) => void;
+  onRenameAgent?: (id: string, displayName: string) => void;
 }
 
 export function AgentGrid({
@@ -20,6 +21,7 @@ export function AgentGrid({
   onFocusAgent,
   onToggleMuteAgent,
   onCloseAgent,
+  onRenameAgent,
 }: AgentGridProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -61,6 +63,7 @@ export function AgentGrid({
               onFocus={() => onFocusAgent?.(agent.id)}
               onToggleMute={() => onToggleMuteAgent?.(agent.id)}
               onClose={() => onCloseAgent?.(agent.id)}
+              onRename={(displayName) => onRenameAgent?.(agent.id, displayName)}
             />
           ))
         )}

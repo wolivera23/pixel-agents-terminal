@@ -83,7 +83,7 @@ describe('AgentStateStore', () => {
       metadata: { command: 'npm install' },
     });
     expect(store.getTimeline().at(-1)?.message).toBe(
-      'Ops Agent pidio permiso para ejecutar un comando.',
+      'Ops Agent necesita permiso para ejecutar un comando.',
     );
 
     store.applyEvent({
@@ -97,7 +97,63 @@ describe('AgentStateStore', () => {
       metadata: { filePath: '/repo/settings.json' },
     });
     expect(store.getTimeline().at(-1)?.message).toBe(
-      'Ops Agent pidio permiso para modificar un archivo.',
+      'Ops Agent necesita permiso para cambiar un archivo.',
+    );
+  });
+
+  it('filters noisy timeline events while keeping raw event history', () => {
+    const store = new AgentStateStore();
+
+    store.applyEvent({
+      id: 'evt-noise',
+      timestamp: 10,
+      source: AgentSource.CODEX,
+      agentId: 'agent-6',
+      type: AgentEventType.AGENT_ACTION,
+      severity: EventSeverity.INFO,
+      title: 'Agent reported progress',
+    });
+
+    expect(store.getEvents()).toHaveLength(1);
+    expect(store.getTimeline()).toHaveLength(0);
+  });
+
+  it('groups related tool events into one timeline narrative', () => {
+    const store = new AgentStateStore();
+
+    store.upsertAgent({
+      id: 'agent-7',
+      name: 'Frontend Agent',
+      type: AgentType.DEV,
+      source: AgentSource.CODEX,
+      state: AgentRuntimeState.IDLE,
+      lastUpdate: 0,
+    });
+
+    store.applyEvent({
+      id: 'evt-read',
+      timestamp: 20,
+      source: AgentSource.CODEX,
+      agentId: 'agent-7',
+      type: AgentEventType.TOOL_USE,
+      severity: EventSeverity.INFO,
+      title: 'Using Read',
+      metadata: { toolName: 'Read', filePath: '/repo/package.json' },
+    });
+    store.applyEvent({
+      id: 'evt-edit',
+      timestamp: 21,
+      source: AgentSource.CODEX,
+      agentId: 'agent-7',
+      type: AgentEventType.TOOL_USE,
+      severity: EventSeverity.INFO,
+      title: 'Using Edit',
+      metadata: { toolName: 'Edit', filePath: '/repo/package.json' },
+    });
+
+    expect(store.getTimeline()).toHaveLength(1);
+    expect(store.getTimeline()[0]?.message).toBe(
+      'Frontend Agent esta leyendo archivos, editando archivos.',
     );
   });
 

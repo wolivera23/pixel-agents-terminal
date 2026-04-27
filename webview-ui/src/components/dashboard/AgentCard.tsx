@@ -1,4 +1,6 @@
-import { MAX_CONTEXT_TOKENS } from '../../constants.js';
+import { useEffect, useState } from 'react';
+
+import { AGENT_DISPLAY_NAME_MAX_LENGTH, MAX_CONTEXT_TOKENS } from '../../constants.js';
 import type { Agent } from '../../domain/types.js';
 import { AgentRuntimeState, AgentSource } from '../../domain/types.js';
 
@@ -9,6 +11,7 @@ interface AgentCardProps {
   onFocus?: () => void;
   onToggleMute?: () => void;
   onClose?: () => void;
+  onRename?: (displayName: string) => void;
 }
 
 const STATE_COLORS: Record<AgentRuntimeState, string> = {
@@ -63,7 +66,10 @@ export function AgentCard({
   onFocus,
   onToggleMute,
   onClose,
+  onRename,
 }: AgentCardProps) {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(agent.name);
   const stateColor = STATE_COLORS[agent.state];
   const isPending = agent.state === AgentRuntimeState.WAITING_PERMISSION;
   const isError =
@@ -77,6 +83,34 @@ export function AgentCard({
   const hasContext = contextUsage !== undefined && contextUsage > 0;
   const ctxPct = hasContext ? Math.min(Math.round(contextUsage! * 100), 100) : 0;
   const ctxColor = hasContext ? contextColor(contextUsage!) : '';
+
+  useEffect(() => {
+    if (!isEditingName) {
+      setDraftName(agent.name);
+    }
+  }, [agent.name, isEditingName]);
+
+  const startRename = (): void => {
+    setDraftName(agent.name);
+    setIsEditingName(true);
+  };
+
+  const cancelRename = (): void => {
+    setDraftName(agent.name);
+    setIsEditingName(false);
+  };
+
+  const submitRename = (): void => {
+    const nextName = draftName.trim().replace(/\s+/g, ' ');
+    if (!nextName) {
+      cancelRename();
+      return;
+    }
+    if (nextName !== agent.name) {
+      onRename?.(nextName);
+    }
+    setIsEditingName(false);
+  };
 
   return (
     <div
@@ -96,13 +130,39 @@ export function AgentCard({
     >
       {/* Name + state dot */}
       <div className="flex items-center justify-between gap-4 mb-4">
-        <span
-          className="text-sm truncate"
-          style={{ color: isError ? 'var(--color-status-error)' : 'var(--color-text)' }}
-          title={agent.name}
-        >
-          {agent.name}
-        </span>
+        {isEditingName ? (
+          <input
+            autoFocus
+            className="text-sm min-w-0 flex-1 bg-bg-dark text-text border border-border px-4 py-2"
+            maxLength={AGENT_DISPLAY_NAME_MAX_LENGTH}
+            value={draftName}
+            onChange={(e) => setDraftName(e.currentTarget.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitRename();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelRename();
+              }
+            }}
+            onBlur={submitRename}
+          />
+        ) : (
+          <span
+            className="text-sm truncate"
+            style={{ color: isError ? 'var(--color-status-error)' : 'var(--color-text)' }}
+            title="Doble click para renombrar"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              startRename();
+            }}
+          >
+            {agent.name}
+          </span>
+        )}
         <div
           className="w-8 h-8 flex-shrink-0"
           style={{ background: stateColor }}
@@ -136,7 +196,7 @@ export function AgentCard({
             color: 'var(--color-status-permission)',
           }}
         >
-          Esperando aprobación
+          Esperando aprobacion
         </div>
       )}
 
@@ -146,7 +206,7 @@ export function AgentCard({
           <div className="flex justify-between mb-2">
             <span className="text-2xs text-text-muted">contexto</span>
             <span className="text-2xs" style={{ color: ctxColor }}>
-              {ctxPct}% · {formatTokens(totalTokens)}
+              {ctxPct}% - {formatTokens(totalTokens)}
             </span>
           </div>
           <div
@@ -201,7 +261,7 @@ export function AgentCard({
           </div>
           {agent.lastAction && (
             <div className="mt-4" title={agent.lastAction}>
-              <div className="mb-2">última acción</div>
+              <div className="mb-2">ultima accion</div>
               <div className="truncate" style={{ color: 'var(--color-text)' }}>
                 {agent.lastAction}
               </div>
@@ -217,10 +277,20 @@ export function AgentCard({
             className="text-2xs px-5 py-3 border border-border bg-btn-bg text-text cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
+              startRename();
+            }}
+          >
+            Renombrar
+          </button>
+          <button
+            type="button"
+            className="text-2xs px-5 py-3 border border-border bg-btn-bg text-text cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
               onFocus?.();
             }}
           >
-            Focus
+            Enfocar
           </button>
           <button
             type="button"
@@ -230,7 +300,7 @@ export function AgentCard({
               onToggleMute?.();
             }}
           >
-            {agent.muted ? 'Unmute' : 'Mute'}
+            {agent.muted ? 'Activar' : 'Silenciar'}
           </button>
           <button
             type="button"
@@ -245,7 +315,7 @@ export function AgentCard({
               onClose?.();
             }}
           >
-            Close
+            Cerrar
           </button>
         </div>
       )}

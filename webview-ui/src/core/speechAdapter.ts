@@ -11,10 +11,11 @@ export function speechEventFromAgentEvent(event: AgentEvent): SpeechEventKind | 
     case 'permission_request':
       return 'permission_request';
     case 'task_completed':
+      return 'task_completed';
     case 'command_finished':
     case 'permission_approved':
     case 'agent_idle':
-      return 'task_completed';
+      return null;
     case 'task_failed':
     case 'error':
     case 'permission_rejected':

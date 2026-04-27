@@ -12,6 +12,7 @@ import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { TopBar } from './components/TopBar.js';
 import { Modal } from './components/ui/Modal.js';
+import { AGENT_DISPLAY_NAME_MAX_LENGTH } from './constants.js';
 import {
   selectActiveAlerts,
   selectPendingPermissions,
@@ -112,6 +113,7 @@ function App() {
   );
   const [mutedAgentIds, setMutedAgentIds] = useState<Set<string>>(() => new Set());
   const mutedAgentIdSet = useMemo(() => new Set(mutedAgentIds), [mutedAgentIds]);
+  const [renamedAgentNames, setRenamedAgentNames] = useState<Record<string, string>>({});
 
   // Domain store — bridges legacy state into normalized Agent/Timeline/Alert model
   const domainState = useAgentControlCenter(
@@ -132,6 +134,7 @@ function App() {
   const dashboardAgents = (realAgents.length > 0 ? realAgents : fallbackDashboardAgents).map(
     (agent) => ({
       ...agent,
+      name: renamedAgentNames[agent.id] ?? agent.name,
       muted: mutedAgentIds.has(agent.id),
     }),
   );
@@ -228,8 +231,32 @@ function App() {
       next.delete(id);
       return next;
     });
+    setRenamedAgentNames((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     setSelectedDomainAgent((prev) => (prev === id ? undefined : prev));
     vscode.postMessage({ type: 'closeAgent', id: numericId });
+  }, []);
+
+  const handleRenameDashboardAgent = useCallback((id: string, displayName: string) => {
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId)) return;
+    const normalized = displayName
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, AGENT_DISPLAY_NAME_MAX_LENGTH);
+    if (!normalized) return;
+
+    const ch = getOfficeState().characters.get(numericId);
+    if (ch) {
+      ch.displayName = normalized;
+    }
+
+    setRenamedAgentNames((prev) => ({ ...prev, [id]: normalized }));
+    vscode.postMessage({ type: 'renameAgent', id: numericId, displayName: normalized });
   }, []);
 
   const handleClick = useCallback((agentId: number) => {
@@ -309,6 +336,7 @@ function App() {
               onFocusAgent={handleFocusDashboardAgent}
               onToggleMuteAgent={handleToggleMuteDashboardAgent}
               onCloseAgent={handleCloseDashboardAgent}
+              onRenameAgent={handleRenameDashboardAgent}
             />
           </div>
         )}

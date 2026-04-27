@@ -18,7 +18,7 @@ export function getSpeechKindForStateTransition(
       return 'permission_request';
     case AgentRuntimeState.IDLE:
     case AgentRuntimeState.DONE:
-      return 'task_completed';
+      return null;
     case AgentRuntimeState.ERROR:
     case AgentRuntimeState.BLOCKED:
       return 'task_failed';
@@ -35,10 +35,11 @@ export function getSpeechKindForDomainEvent(eventType: AgentEventType): SpeechEv
     case AgentEventType.PERMISSION_REQUEST:
       return 'permission_request';
     case AgentEventType.TASK_COMPLETED:
+      return 'task_completed';
     case AgentEventType.COMMAND_FINISHED:
     case AgentEventType.PERMISSION_APPROVED:
     case AgentEventType.AGENT_IDLE:
-      return 'task_completed';
+      return null;
     case AgentEventType.TASK_FAILED:
     case AgentEventType.ERROR:
     case AgentEventType.PERMISSION_REJECTED:

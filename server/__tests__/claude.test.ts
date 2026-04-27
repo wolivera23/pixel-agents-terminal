@@ -132,13 +132,13 @@ describe('claudeProvider', () => {
       expect(result?.event.kind).toBe('permissionRequest');
     });
 
-    it('normalizes Notification(idle_prompt) to turnEnd', () => {
+    it('ignores Notification(idle_prompt) because Stop owns turn completion', () => {
       const result = claudeProvider.normalizeHookEvent({
         hook_event_name: 'Notification',
         session_id: 'sess-1',
         notification_type: 'idle_prompt',
       });
-      expect(result?.event.kind).toBe('turnEnd');
+      expect(result).toBeNull();
     });
 
     it('returns null for Notification with unknown type', () => {

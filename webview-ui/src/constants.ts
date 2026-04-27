@@ -193,3 +193,40 @@ export const TEAM_LEAD_COLOR = '#ffd700';
 export const TEAM_ROLE_COLOR = '#66aaff';
 export const NAME_TAG_TEXT_COLOR = 'rgba(255,255,255,0.7)';
 export const NAME_TAG_BG_COLOR = 'rgba(10,10,20,0.55)';
+
+// Timeline humanization
+export const TIMELINE_GROUP_WINDOW_MS = 30_000;
+export const TIMELINE_TOOL_SUMMARY_LIMIT = 3;
+export const AGENT_DISPLAY_NAME_MAX_LENGTH = 24;
+export const AGENT_DISPLAY_NAMES = [
+  'Ada',
+  'Turing',
+  'Grace',
+  'Linus',
+  'Margaret',
+  'Dennis',
+  'Barbara',
+  'Ken',
+  'Radia',
+  'Edsger',
+  'Tokyo',
+  'Paris',
+  'Lisbon',
+  'Berlin',
+  'Madrid',
+  'London',
+  'Rome',
+  'Vienna',
+  'Prague',
+  'Dublin',
+  'Seoul',
+  'Sydney',
+  'Cairo',
+  'Lima',
+  'Quito',
+  'Bogota',
+  'Havana',
+  'Oslo',
+  'Zurich',
+  'Boston',
+] as const;

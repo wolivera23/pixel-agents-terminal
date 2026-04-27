@@ -335,7 +335,7 @@ export class HookEventHandler {
         // hook -- normalizeHookEvent collapses them into one event kind.
         return this.handlePermissionRequest(agent, agentId, webview);
       case 'turnEnd':
-        // Handles Stop AND Notification(idle_prompt) -- both normalize to turnEnd.
+        // Handles Stop. Notification(idle_prompt) is ignored so only Stop owns turn completion.
         return this.handleStop(agent, agentId, webview);
       case 'subagentTurnEnd':
         // Handles TeammateIdle AND TaskCompleted -- both normalize here. The team-

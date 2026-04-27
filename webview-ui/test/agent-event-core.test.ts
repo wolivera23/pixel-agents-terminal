@@ -69,7 +69,8 @@ test('timeline and speech adapters derive human-facing outputs from AgentEvent',
   assert.ok(event);
 
   const timelineEvent = agentEventToTimelineEvent(event);
+  assert.ok(timelineEvent);
   assert.equal(timelineEvent.agentId, '4');
-  assert.match(timelineEvent.message, /Command started|Tool started/);
+  assert.match(timelineEvent.message, /Agente 4 esta usando Bash/);
   assert.equal(speechEventFromAgentEvent(event), 'turn_started');
 });

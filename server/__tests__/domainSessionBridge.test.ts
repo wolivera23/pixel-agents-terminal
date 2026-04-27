@@ -17,12 +17,14 @@ describe('DomainSessionBridge', () => {
     expect(result?.agentId).toBe(1);
     expect(result?.providerId).toBe('codex');
     expect(result?.folderName).toBe('repo');
+    expect(result?.displayName).toBe('Ada');
     expect(result?.domainMessages.some((msg) => msg.type === 'domainAgentUpserted')).toBe(true);
 
     const snapshot = bridge.buildSnapshot();
     expect(snapshot.type).toBe('domainSnapshot');
     expect(snapshot.protocolVersion).toBe(1);
     expect(snapshot.agents).toHaveLength(1);
+    expect(snapshot.agents[0]?.name).toBe('Ada');
     expect(snapshot.agents[0]?.source).toBe('codex');
   });
 
@@ -54,6 +56,24 @@ describe('DomainSessionBridge', () => {
     expect(bridge.buildSnapshot().permissions).toHaveLength(0);
   });
 
+  it('renames an active agent and replays the display name', () => {
+    const bridge = new DomainSessionBridge(hookProvidersById);
+
+    bridge.handleHookEvent('codex', {
+      hook_event_name: 'SessionStart',
+      session_id: 'sess-rename',
+      cwd: 'C:\\repo',
+      source: 'startup',
+    });
+
+    const messages = bridge.renameAgent(1, 'Frontend');
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.type).toBe('domainAgentUpserted');
+    expect(bridge.buildSnapshot().agents[0]?.name).toBe('Frontend');
+    expect(bridge.buildLegacyReplayAgents()[0]?.displayName).toBe('Frontend');
+  });
+
   it('replays legacy agent metadata and clears it on session end', () => {
     const bridge = new DomainSessionBridge(hookProvidersById);
 
@@ -69,6 +89,7 @@ describe('DomainSessionBridge', () => {
         agentId: 1,
         providerId: 'codex',
         folderName: 'backend',
+        displayName: 'Ada',
       },
     ]);
 

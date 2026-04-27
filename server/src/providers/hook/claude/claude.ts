@@ -216,9 +216,6 @@ function normalizeHookEvent(
           },
         };
       }
-      if (notificationType === 'idle_prompt') {
-        return { sessionId, event: { kind: 'turnEnd' } };
-      }
       return null;
     }
 

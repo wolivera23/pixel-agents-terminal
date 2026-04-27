@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { AGENT_DISPLAY_NAME_MAX_LENGTH } from '../server/src/constants.js';
 import type { HookEvent } from '../server/src/hookEventHandler.js';
 import { HookEventHandler } from '../server/src/hookEventHandler.js';
 import {
@@ -125,6 +126,12 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   private persistAgents = (): void => {
     persistAgents(this.agents, this.context);
   };
+
+  private normalizeDisplayName(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().replace(/\s+/g, ' ').slice(0, AGENT_DISPLAY_NAME_MAX_LENGTH);
+    return normalized.length > 0 ? normalized : null;
+  }
 
   private initHooks(): void {
     setHookProviders(hookProviders);
@@ -406,6 +413,15 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             );
             webviewView.webview.postMessage({ type: 'agentClosed', id: message.id });
           }
+        }
+      } else if (message.type === 'renameAgent') {
+        const id = message.id as number;
+        const displayName = this.normalizeDisplayName(message.displayName);
+        const agent = this.agents.get(id);
+        if (agent && displayName) {
+          agent.displayName = displayName;
+          this.persistAgents();
+          webviewView.webview.postMessage({ type: 'agentRenamed', id, displayName });
         }
       } else if (message.type === 'saveAgentSeats') {
         // Store seat assignments in a separate key (never touched by persistAgents)

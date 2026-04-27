@@ -131,7 +131,7 @@ describe('HookEventHandler', () => {
     expect(agent.permissionSent).toBe(true);
   });
 
-  it('Notification idle_prompt marks agent waiting', () => {
+  it('Notification idle_prompt does not mark agent waiting', () => {
     const agent = createTestAgent({ id: 1 });
     agents.set(1, agent);
     handler.registerAgent('sess-1', 1);
@@ -142,11 +142,11 @@ describe('HookEventHandler', () => {
       notification_type: 'idle_prompt',
     });
 
-    expect(agent.isWaiting).toBe(true);
+    expect(agent.isWaiting).toBe(false);
     const msg = mockWebview.messages.find(
       (m) => m.type === 'agentStatus' && m.status === 'waiting',
     );
-    expect(msg).toBeTruthy();
+    expect(msg).toBeFalsy();
   });
 
   // ── Stop ────────────────────────────────────────────────────

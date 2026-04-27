@@ -63,7 +63,15 @@ export function domainReducer(state: DomainState, action: DomainAction): DomainS
       };
     }
     case 'ADD_TIMELINE': {
-      const combined = [...state.timeline, ...action.events];
+      const combined = [...state.timeline];
+      for (const event of action.events) {
+        const existingIndex = combined.findIndex((current) => current.id === event.id);
+        if (existingIndex >= 0) {
+          combined[existingIndex] = event;
+        } else {
+          combined.push(event);
+        }
+      }
       return {
         ...state,
         timeline: combined.length > MAX_TIMELINE ? combined.slice(-MAX_TIMELINE) : combined,

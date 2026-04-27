@@ -19,6 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
 
+import { AGENT_DISPLAY_NAME_MAX_LENGTH } from './constants.js';
 import { DomainSessionBridge } from './domain/domainSessionBridge.js';
 import type { DomainWsClientMessage } from './domain/wsProtocol.js';
 import { copyAllHookScripts, hookProvidersById, installAllHooks } from './providers/index.js';
@@ -258,11 +259,18 @@ function handleHookEvent(providerId: string, event: Record<string, unknown>): vo
     isNewAgent,
     providerId: resolvedProviderId,
     folderName,
+    displayName,
     domainMessages,
   } = domainResult;
 
   if (isNewAgent) {
-    broadcast({ type: 'agentCreated', id, folderName, providerId: resolvedProviderId });
+    broadcast({
+      type: 'agentCreated',
+      id,
+      folderName,
+      displayName,
+      providerId: resolvedProviderId,
+    });
   }
   for (const msg of domainMessages) broadcast(msg);
 
@@ -343,6 +351,12 @@ function handleHookEvent(providerId: string, event: Record<string, unknown>): vo
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+function normalizeDisplayName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/\s+/g, ' ').slice(0, AGENT_DISPLAY_NAME_MAX_LENGTH);
+  return normalized.length > 0 ? normalized : null;
+}
+
 async function main(): Promise<void> {
   // Install hook script + Claude Code settings entries
   try {
@@ -385,6 +399,7 @@ async function main(): Promise<void> {
             type: 'agentCreated',
             id: agent.agentId,
             folderName: agent.folderName,
+            displayName: agent.displayName,
             providerId: agent.providerId,
           }),
         );
@@ -420,6 +435,15 @@ async function main(): Promise<void> {
             broadcast(domainMsg);
           }
           broadcast({ type: 'agentClosed', id: msg.id });
+          return;
+        }
+        if (msg.type === 'renameAgent') {
+          const displayName = normalizeDisplayName(msg.displayName);
+          if (!displayName) return;
+          for (const domainMsg of domainBridge.renameAgent(msg.id, displayName)) {
+            broadcast(domainMsg);
+          }
+          broadcast({ type: 'agentRenamed', id: msg.id, displayName });
           return;
         }
         for (const domainMsg of domainBridge.handleClientMessage(msg)) {
